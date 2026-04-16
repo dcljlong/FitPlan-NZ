@@ -1,0 +1,108 @@
+{
+  "theme": "LIGHT",
+  "archetype": "4_SWISS_HIGH_CONTRAST",
+  "archetype_description": "Authority, Clarity, Truth. High visibility for construction environments, minimizing glare while maximizing data readability on-site. Purely functional, no-nonsense.",
+  "colors": {
+    "background": "#F9FAFB",
+    "surface": "#FFFFFF",
+    "surface_secondary": "#F3F4F6",
+    "primary": "#F97316",
+    "primary_foreground": "#FFFFFF",
+    "secondary": "#1E293B",
+    "secondary_foreground": "#F8FAFC",
+    "accent": "#FACC15",
+    "text_primary": "#0F172A",
+    "text_secondary": "#475569",
+    "border": "#E2E8F0",
+    "status": {
+      "under_time_green": "#10B981",
+      "on_track_yellow": "#F59E0B",
+      "over_time_red": "#EF4444"
+    }
+  },
+  "typography": {
+    "heading_font": "System (Bold/Heavy)",
+    "body_font": "System (Regular)",
+    "scale": {
+      "h1": { "fontSize": 32, "fontWeight": "800", "letterSpacing": -1 },
+      "h2": { "fontSize": 24, "fontWeight": "700", "letterSpacing": -0.5 },
+      "h3": { "fontSize": 20, "fontWeight": "600" },
+      "body_large": { "fontSize": 18, "fontWeight": "400" },
+      "body": { "fontSize": 16, "fontWeight": "400", "lineHeight": 24 },
+      "caption_uppercase": { "fontSize": 12, "fontWeight": "700", "letterSpacing": 1.5, "textTransform": "uppercase" }
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "2xl": 48
+  },
+  "layout_and_components": {
+    "borders": {
+      "radius_sm": 4,
+      "radius_md": 8,
+      "radius_lg": 12,
+      "radius_pill": 9999
+    },
+    "shadows": {
+      "subtle": { "shadowColor": "#0F172A", "shadowOffset": { "width": 0, "height": 2 }, "shadowOpacity": 0.05, "shadowRadius": 4, "elevation": 2 },
+      "medium": { "shadowColor": "#0F172A", "shadowOffset": { "width": 0, "height": 4 }, "shadowOpacity": 0.1, "shadowRadius": 6, "elevation": 4 }
+    },
+    "component_rules": {
+      "cards": "Flat, pure white background (#FFFFFF). 1px solid #E2E8F0 border. Subtle shadow. Inner padding 16px to 24px.",
+      "buttons": "Primary buttons: High-vis Orange (#F97316) background, white text. Large tap targets (min 48px height) for gloved/working hands.",
+      "inputs": "Large padding (16px), thick borders on focus (2px solid #F97316). Clear labels above inputs.",
+      "bottom_sheets": "Use bottom-sheet architecture for task details, assignments, and filters instead of full-page transitions to keep Gantt context visible.",
+      "navigation": "Thumb-friendly bottom tab navigation (Projects, Team, Settings).",
+      "gantt_chart": "Horizontal ScrollView with sticky left column. Use distinct status colors (Green/Yellow/Red) for progress bars based on quoted vs logged hours."
+    }
+  },
+  "motion_and_interaction": {
+    "gestures": "Implement swipe-to-action on task lists if possible (e.g., swipe to mark complete).",
+    "haptics": "Trigger light haptic feedback on major actions (saving template, logging hours, completing task) using expo-haptics.",
+    "transitions": "Fast, functional transitions. Slide up for bottom sheets."
+  },
+  "accessibility": {
+    "tap_targets": "Minimum 48x48 points for all interactive elements.",
+    "contrast": "Ensure text over primary orange or status colors meets minimum 3:1 contrast ratio.",
+    "testing": "All touchable elements must have testID attributes mapping to their function (e.g., testID='login-submit-btn')."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "onboarding_background",
+        "url": "https://images.unsplash.com/photo-1768321916877-8cf4e4ef7487?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwxfHxpbnRlcmlvciUyMGZpdG91dCUyMGNvbnN0cnVjdGlvbnxlbnwwfHx8fDE3NzYzMzY2MjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Interior hallway under construction. Use with dark or dark-orange overlay for login/onboarding."
+      },
+      {
+        "category": "project_placeholder",
+        "url": "https://images.unsplash.com/photo-1569932057609-d2bf139ac234?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwyfHxpbnRlcmlvciUyMGZpdG91dCUyMGNvbnN0cnVjdGlvbnxlbnwwfHx8fDE3NzYzMzY2MjJ8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Black ladder near painted wall. Used as a fallback cover image for fitout projects."
+      },
+      {
+         "category": "team_member_avatar",
+         "url": "https://images.unsplash.com/photo-1672748341520-6a839e6c05bb?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxjb25zdHJ1Y3Rpb24lMjB3b3JrZXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3NzYzMzY2MzZ8MA&ixlib=rb-4.1.0&q=85",
+         "description": "Man wearing hard hat. Use as a placeholder avatar in team management list."
+      }
+    ],
+    "icons": {
+      "library": "@expo/vector-icons (Feather or Ionicons)",
+      "style": "Bold, clear, stroke-based icons. No intricate details to ensure visibility outdoors."
+    }
+  },
+  "instructions_to_main_agent": [
+    "CRITICAL: This is an EXPO REACT NATIVE APP. DO NOT USE HTML, Tailwind CSS, or Web Shadcn/UI components.",
+    "Use standard React Native primitives: View, Text, TouchableOpacity, ScrollView, TextInput, FlatList with StyleSheet.create.",
+    "Gantt Chart implementation: Build a custom Gantt view. Consider a horizontal ScrollView containing rows, where the left side is absolute/fixed or synchronized scrolling.",
+    "Login Flow: Simple name-based login (no passwords). Just one TextInput to enter name, save to AsyncStorage.",
+    "Staff Calculator: Auto-calculate needed staff by formula: (Quoted Hours) / (Duration in days * Working Hours per day). Respect schedule: Mon-Thu 9h, Fri 8h, Sat 6h (optional).",
+    "Project Templates: Pre-load templates for: Steel Partitions, Aluminium Joinery, Doors, Gib & Villa Board Linings, Plastering, Concealed Grid, 2-Way Grid & Tiles, Feature Linings. Support saving custom projects as templates.",
+    "Progress Indicators: Compare logged hours vs quoted hours per task. Green (Under time), Yellow (On track), Red (Over time). Use the status colors provided.",
+    "Holidays & Regional Location: Integrate NZ regional holidays logic that skips non-working days in Gantt.",
+    "Export: Provide a way to export data using expo-print (PDF) or sharing a CSV string via expo-sharing.",
+    "Testing: Add testID props to all interactive elements for automated testing (kebab-case, role-based, e.g., testID='login-button')."
+  ]
+}
