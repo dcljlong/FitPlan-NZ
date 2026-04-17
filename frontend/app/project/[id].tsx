@@ -21,15 +21,26 @@ import {
 } from '../../components/theme';
 import { api } from '../../components/api';
 
-function getTaskReadiness(task: any) {
+function isTaskBlocked(task: any, taskMap: Record<string, any>) {
   const deps = task.dependencies || [];
-  const hasDeps = deps.length > 0;
-  const status = task.status || 'not_started';
+  if (deps.length === 0) return false;
+  return deps.some((depId: string) => {
+    const dep = taskMap[depId];
+    return !dep || dep.status !== 'completed';
+  });
+}
 
+function isTaskReady(task: any, taskMap: Record<string, any>) {
+  if ((task.status || 'not_started') !== 'not_started') return false;
+  return !isTaskBlocked(task, taskMap);
+}
+
+function getTaskReadiness(task: any, taskMap: Record<string, any>) {
+  const status = task.status || 'not_started';
   if (status === 'completed') return 'completed';
-  if (hasDeps && status === 'not_started') return 'blocked';
-  if (!hasDeps && status === 'not_started') return 'ready';
   if (status === 'in_progress') return 'active';
+  if (isTaskBlocked(task, taskMap)) return 'blocked';
+  if (isTaskReady(task, taskMap)) return 'ready';
   return 'ready';
 }
 
@@ -51,6 +62,15 @@ function getReadinessLabel(readiness: string) {
     case 'active': return 'Active';
     default: return 'Unknown';
   }
+}
+
+function isTaskLate(task: any, project: any) {
+  if (!project?.target_end_date || !task?.end_date) return false;
+  return String(task.end_date) > String(project.target_end_date);
+}
+
+function isTaskStaffRisk(task: any) {
+  return ['under', 'unassigned'].includes(task.staffing_status);
 }
 
 export default function ProjectDetailScreen() {
@@ -98,14 +118,16 @@ export default function ProjectDetailScreen() {
   }
 
   const tasks = project.tasks || [];
+  const taskMap = Object.fromEntries(tasks.map((t: any) => [t.id, t]));
   const indicatorColor = getStatusColor(project.overall_indicator);
   const scheduleColor = getScheduleColor(project.schedule_status);
 
-  const blockedCount = tasks.filter((t: any) => getTaskReadiness(t) === 'blocked').length;
-  const readyCount = tasks.filter((t: any) => getTaskReadiness(t) === 'ready').length;
-  const activeCount = tasks.filter((t: any) => getTaskReadiness(t) === 'active').length;
-  const doneCount = tasks.filter((t: any) => getTaskReadiness(t) === 'completed').length;
-  const riskCount = tasks.filter((t: any) => ['under', 'unassigned'].includes(t.staffing_status)).length;
+  const blockedCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'blocked').length;
+  const readyCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'ready').length;
+  const activeCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'active').length;
+  const doneCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'completed').length;
+  const staffRiskCount = tasks.filter((t: any) => isTaskStaffRisk(t)).length;
+  const lateCount = tasks.filter((t: any) => isTaskLate(t, project)).length;
 
   const progressPct = project.total_quoted_hours > 0
     ? Math.min((project.total_logged_hours / project.total_quoted_hours) * 100, 100)
@@ -113,12 +135,16 @@ export default function ProjectDetailScreen() {
 
   const sortedTasks = [...tasks].sort((a: any, b: any) => {
     const weight = (t: any) => {
-      const readiness = getTaskReadiness(t);
-      if (readiness === 'active') return 0;
-      if (readiness === 'ready') return 1;
-      if (readiness === 'blocked') return 2;
-      if (readiness === 'completed') return 3;
-      return 4;
+      const readiness = getTaskReadiness(t, taskMap);
+      const late = isTaskLate(t, project);
+      const staffRisk = isTaskStaffRisk(t);
+
+      if (late || staffRisk) return 0;
+      if (readiness === 'active') return 1;
+      if (readiness === 'ready') return 2;
+      if (readiness === 'blocked') return 3;
+      if (readiness === 'completed') return 4;
+      return 5;
     };
     return weight(a) - weight(b);
   });
@@ -196,11 +222,11 @@ export default function ProjectDetailScreen() {
           </View>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Staff Risk</Text>
-            <Text style={[styles.summaryValue, { color: riskCount > 0 ? colors.red : colors.textPrimary }]}>{riskCount}</Text>
+            <Text style={[styles.summaryValue, { color: staffRiskCount > 0 ? colors.red : colors.textPrimary }]}>{staffRiskCount}</Text>
           </View>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Req Staff</Text>
-            <Text style={styles.summaryValue}>{project.total_required_staff || 0}</Text>
+            <Text style={styles.summaryLabel}>Late</Text>
+            <Text style={[styles.summaryValue, { color: lateCount > 0 ? colors.red : colors.textPrimary }]}>{lateCount}</Text>
           </View>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Alloc Staff</Text>
@@ -215,15 +241,21 @@ export default function ProjectDetailScreen() {
             <Text style={styles.emptyText}>No tasks yet</Text>
           ) : (
             sortedTasks.map((task: any) => {
-              const readiness = getTaskReadiness(task);
+              const readiness = getTaskReadiness(task, taskMap);
               const readinessColor = getReadinessColor(readiness);
               const staffingColor = getStaffingColor(task.staffing_status);
               const depsCount = (task.dependencies || []).length;
+              const late = isTaskLate(task, project);
+              const staffRisk = isTaskStaffRisk(task);
 
               return (
                 <TouchableOpacity
                   key={task.id}
-                  style={styles.taskCard}
+                  style={[
+                    styles.taskCard,
+                    late && styles.taskCardLate,
+                    staffRisk && styles.taskCardRisk,
+                  ]}
                   onPress={() => router.push(`/task/${task.id}`)}
                   activeOpacity={0.75}
                 >
@@ -255,6 +287,21 @@ export default function ProjectDetailScreen() {
                       </Text>
                     </View>
                   </View>
+
+                  {(late || staffRisk) && (
+                    <View style={styles.riskRow}>
+                      {late && (
+                        <View style={[styles.riskBadge, { backgroundColor: colors.red + '20' }]}>
+                          <Text style={[styles.riskBadgeText, { color: colors.red }]}>Schedule At Risk</Text>
+                        </View>
+                      )}
+                      {staffRisk && (
+                        <View style={[styles.riskBadge, { backgroundColor: colors.yellow + '20' }]}>
+                          <Text style={[styles.riskBadgeText, { color: colors.yellow }]}>Staff At Risk</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
 
                   <View style={styles.taskBottomRow}>
                     <Text style={styles.taskHours}>{(task.logged_hours || 0).toFixed(1)} / {task.quoted_hours || 0} hrs</Text>
@@ -352,6 +399,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSecondary,
     marginBottom: spacing.sm,
   },
+  taskCardLate: {
+    borderColor: colors.red,
+  },
+  taskCardRisk: {
+    borderColor: colors.yellow,
+  },
   taskTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -381,6 +434,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     fontWeight: '500',
+  },
+  riskRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  riskBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  riskBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   taskBottomRow: {
     flexDirection: 'row',
