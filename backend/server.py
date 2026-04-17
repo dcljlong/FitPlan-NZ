@@ -640,15 +640,43 @@ async def update_task(task_id: str, req: TaskUpdate):
     task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     updates = {k: v for k, v in req.dict().items() if v is not None}
+
     # Handle start_date as a manual override
     if "start_date" in updates:
         updates["start_date_override"] = updates["start_date"]
+
     if updates:
         await db.tasks.update_one({"id": task_id}, {"$set": updates})
+
+    if "dependencies" in updates:
+        all_tasks = await db.tasks.find({"project_id": task["project_id"]}, {"_id": 0}).sort("order", 1).to_list(500)
+        updated_task = next((t for t in all_tasks if t["id"] == task_id), None)
+        if updated_task:
+            dep_orders = []
+            for dep_id in updated_task.get("dependencies", []):
+                dep = next((t for t in all_tasks if t["id"] == dep_id), None)
+                if dep:
+                    dep_orders.append(dep.get("order", 0))
+
+            if dep_orders:
+                target_order = max(dep_orders) + 1
+                current_order = updated_task.get("order", 0)
+
+                if target_order != current_order:
+                    reordered = [t for t in all_tasks if t["id"] != task_id]
+                    if target_order > len(reordered):
+                        target_order = len(reordered)
+                    reordered.insert(target_order, updated_task)
+
+                    for idx, t in enumerate(reordered):
+                        await db.tasks.update_one({"id": t["id"]}, {"$set": {"order": idx}})
+
     need_recalc = any(k in updates for k in ["duration_days", "dependencies", "order", "start_date"])
     if need_recalc:
         await recalculate_task_dates(task["project_id"])
+
     updated_task = await db.tasks.find_one({"id": task_id}, {"_id": 0})
     project = await db.projects.find_one({"id": task["project_id"]}, {"_id": 0})
     return await build_task_response(updated_task, project)
