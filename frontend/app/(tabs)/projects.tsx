@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+﻿import React, { useState, useCallback } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl,
@@ -6,7 +6,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radius, typography, shadows, getStatusColor, getStatusLabel } from '../../components/theme';
+import { colors, spacing, radius, typography, shadows, getStatusColor, getStatusLabel, getScheduleColor, getScheduleLabel } from '../../components/theme';
 import { api } from '../../components/api';
 import { useUser } from '../../contexts/UserContext';
 
@@ -38,6 +38,7 @@ export default function ProjectsScreen() {
 
   const renderProject = ({ item }: { item: any }) => {
     const indicatorColor = getStatusColor(item.overall_indicator);
+    const scheduleColor = getScheduleColor(item.schedule_status);
     const progress = item.task_count > 0 ? item.completed_tasks / item.task_count : 0;
     return (
       <TouchableOpacity
@@ -57,11 +58,21 @@ export default function ProjectsScreen() {
         <View style={styles.cardMeta}>
           <View style={styles.metaItem}>
             <Feather name="calendar" size={14} color={colors.textSecondary} />
-            <Text style={styles.metaText}>{item.start_date}</Text>
+            <Text style={styles.metaText}>{item.start_date} → {item.forecast_end_date || item.end_date}</Text>
           </View>
           <View style={styles.metaItem}>
             <Feather name="list" size={14} color={colors.textSecondary} />
             <Text style={styles.metaText}>{item.completed_tasks}/{item.task_count} tasks</Text>
+          </View>
+        </View>
+        <View style={styles.cardMeta}>
+          <View style={styles.metaItem}>
+            <Feather name="target" size={14} color={scheduleColor} />
+            <Text style={[styles.metaText, { color: scheduleColor }]}>{item.target_end_date || 'No target finish'}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Feather name="users" size={14} color={item.understaffed_tasks > 0 ? colors.red : colors.textSecondary} />
+            <Text style={[styles.metaText, item.understaffed_tasks > 0 && { color: colors.red }]}>{item.understaffed_tasks || 0} staff risk</Text>
           </View>
         </View>
         <View style={styles.progressBarBg}>
@@ -71,10 +82,17 @@ export default function ProjectsScreen() {
           <Text style={styles.hoursLabel}>
             {item.total_logged_hours?.toFixed(1) || '0'} / {item.total_quoted_hours?.toFixed(1) || '0'} hrs
           </Text>
-          <View style={[styles.statusBadge, { backgroundColor: indicatorColor + '20' }]}>
-            <Text style={[styles.statusBadgeText, { color: indicatorColor }]}>
-              {getStatusLabel(item.overall_indicator)}
-            </Text>
+          <View style={styles.badgeRow}>
+            <View style={[styles.statusBadge, { backgroundColor: scheduleColor + '20' }]}>
+              <Text style={[styles.statusBadgeText, { color: scheduleColor }]}>
+                {getScheduleLabel(item.schedule_status)}
+              </Text>
+            </View>
+            <View style={[styles.statusBadge, { backgroundColor: indicatorColor + '20' }]}>
+              <Text style={[styles.statusBadgeText, { color: indicatorColor }]}>
+                {getStatusLabel(item.overall_indicator)}
+              </Text>
+            </View>
           </View>
         </View>
       </TouchableOpacity>
@@ -125,42 +143,94 @@ export default function ProjectsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
-    paddingHorizontal: spacing.lg, paddingTop: spacing.md,
-    paddingBottom: spacing.md, backgroundColor: colors.surface,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
-  greeting: { ...typography.body, color: colors.textSecondary },
-  headerTitle: { ...typography.h1, color: colors.textPrimary, marginTop: spacing.xs },
+  greeting: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  headerTitle: {
+    ...typography.h1,
+    color: colors.textPrimary,
+    marginTop: 2,
+  },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { padding: spacing.md, paddingBottom: 100 },
   card: {
-    backgroundColor: colors.surface, borderRadius: radius.lg,
-    padding: spacing.md, marginBottom: spacing.md,
-    borderWidth: 1, borderColor: colors.border, ...shadows.subtle,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.subtle,
   },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.sm },
-  cardTitle: { ...typography.h3, color: colors.textPrimary, flex: 1 },
-  cardDesc: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.sm },
-  cardMeta: { flexDirection: 'row', marginBottom: spacing.sm, gap: spacing.md },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  metaText: { fontSize: 13, color: colors.textSecondary },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: spacing.sm,
+  },
+  cardTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  cardDesc: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  cardMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+    gap: spacing.sm,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flex: 1,
+  },
+  metaText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
   progressBarBg: {
-    height: 6, backgroundColor: colors.surfaceSecondary,
-    borderRadius: 3, marginBottom: spacing.sm, overflow: 'hidden',
+    height: 6,
+    backgroundColor: colors.border,
+    borderRadius: 3,
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
   },
   progressBarFill: { height: 6, borderRadius: 3 },
-  hoursRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  hoursRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   hoursLabel: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
   statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.pill },
   statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  empty: { alignItems: 'center', paddingTop: 80 },
-  emptyText: { ...typography.h3, color: colors.textSecondary, marginTop: spacing.md },
+  empty: { alignItems: 'center', marginTop: 100 },
+  emptyText: { ...typography.h3, color: colors.textPrimary, marginTop: spacing.md },
   emptySubtext: { ...typography.body, color: colors.textSecondary, marginTop: spacing.xs },
   fab: {
-    position: 'absolute', bottom: 24, right: 24,
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: colors.primary, justifyContent: 'center',
-    alignItems: 'center', ...shadows.medium,
+    position: 'absolute',
+    right: spacing.lg,
+    bottom: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.medium,
   },
 });

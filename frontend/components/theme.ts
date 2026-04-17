@@ -1,4 +1,4 @@
-export const colors = {
+﻿export const colors = {
   background: '#F9FAFB',
   surface: '#FFFFFF',
   surfaceSecondary: '#F3F4F6',
@@ -73,5 +73,41 @@ export function getStatusLabel(indicator: string) {
     case 'yellow': return 'On Track';
     case 'red': return 'Over Time';
     default: return 'No Hours';
+  }
+}
+
+export function getScheduleColor(status: string) {
+  switch (status) {
+    case 'on_track': return colors.green;
+    case 'late': return colors.red;
+    default: return colors.border;
+  }
+}
+
+export function getScheduleLabel(status: string) {
+  switch (status) {
+    case 'on_track': return 'On Target';
+    case 'late': return 'Late';
+    default: return 'No Target';
+  }
+}
+
+export function getStaffingColor(status: string) {
+  switch (status) {
+    case 'ok': return colors.green;
+    case 'over': return colors.yellow;
+    case 'under': return colors.red;
+    case 'unassigned': return colors.textSecondary;
+    default: return colors.border;
+  }
+}
+
+export function getStaffingLabel(status: string) {
+  switch (status) {
+    case 'ok': return 'Staff OK';
+    case 'over': return 'Overstaffed';
+    case 'under': return 'Short Staff';
+    case 'unassigned': return 'No Staff';
+    default: return 'Not Set';
   }
 }
