@@ -1,7 +1,8 @@
 ﻿import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl,
+  ActivityIndicator, RefreshControl, Modal, TextInput,
+  KeyboardAvoidingView, Platform, Switch,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -78,6 +79,21 @@ export default function ProjectDetailScreen() {
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showEditProject, setShowEditProject] = useState(false);
+  const [showAddTask, setShowAddTask] = useState(false);
+
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editTargetEndDate, setEditTargetEndDate] = useState('');
+  const [editSaturdayEnabled, setEditSaturdayEnabled] = useState(false);
+
+  const [newTaskName, setNewTaskName] = useState('');
+  const [newTaskDuration, setNewTaskDuration] = useState('5');
+  const [newTaskQuotedHours, setNewTaskQuotedHours] = useState('0');
+  const [newTaskAllocatedStaff, setNewTaskAllocatedStaff] = useState('0');
+  const [newTaskStartDate, setNewTaskStartDate] = useState('');
+
   const router = useRouter();
 
   const loadProject = async () => {
@@ -99,6 +115,66 @@ export default function ProjectDetailScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     loadProject();
+  };
+
+  const openEditProject = () => {
+    if (!project) return;
+    setEditName(project.name || '');
+    setEditDescription(project.description || '');
+    setEditTargetEndDate(project.target_end_date || '');
+    setEditSaturdayEnabled(!!project.saturday_enabled);
+    setShowEditProject(true);
+  };
+
+  const handleSaveProject = async () => {
+    if (!editName.trim()) return;
+    if (editTargetEndDate && !editTargetEndDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+
+    setSaving(true);
+    try {
+      await api.updateProject(id!, {
+        name: editName.trim(),
+        description: editDescription.trim(),
+        target_end_date: editTargetEndDate.trim() || null,
+        saturday_enabled: editSaturdayEnabled,
+      });
+      setShowEditProject(false);
+      loadProject();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAddTask = async () => {
+    if (!newTaskName.trim()) return;
+    if (!newTaskDuration || parseInt(newTaskDuration) <= 0) return;
+    if (newTaskStartDate && !newTaskStartDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+
+    setSaving(true);
+    try {
+      const payload: any = {
+        name: newTaskName.trim(),
+        duration_days: parseInt(newTaskDuration) || 1,
+        quoted_hours: parseFloat(newTaskQuotedHours) || 0,
+        allocated_staff_count: parseInt(newTaskAllocatedStaff) || 0,
+        order: (project?.tasks || []).length,
+        dependencies: [],
+      };
+      if (newTaskStartDate.trim()) {
+        payload.start_date = newTaskStartDate.trim();
+      }
+      await api.createTask(id!, payload);
+
+      setNewTaskName('');
+      setNewTaskDuration('5');
+      setNewTaskQuotedHours('0');
+      setNewTaskAllocatedStaff('0');
+      setNewTaskStartDate('');
+      setShowAddTask(false);
+      loadProject();
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -156,7 +232,14 @@ export default function ProjectDetailScreen() {
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{project.name}</Text>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerActions}>
+          <TouchableOpacity testID="edit-project-btn" onPress={openEditProject}>
+            <Feather name="edit-2" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity testID="add-task-btn" onPress={() => setShowAddTask(true)}>
+            <Feather name="plus-circle" size={22} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
@@ -184,6 +267,13 @@ export default function ProjectDetailScreen() {
             </View>
             <View style={[styles.inlineBadge, { backgroundColor: indicatorColor + '20' }]}>
               <Text style={[styles.inlineBadgeText, { color: indicatorColor }]}>{getStatusLabel(project.overall_indicator)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroMetaItem}>
+              <Feather name="sun" size={15} color={colors.textSecondary} />
+              <Text style={styles.heroMetaText}>{project.saturday_enabled ? 'Saturday work enabled' : 'Saturday work off'}</Text>
             </View>
           </View>
 
@@ -235,7 +325,13 @@ export default function ProjectDetailScreen() {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>TASKS</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>TASKS</Text>
+            <TouchableOpacity style={styles.sectionAddBtn} onPress={() => setShowAddTask(true)}>
+              <Feather name="plus" size={16} color={colors.primary} />
+              <Text style={styles.sectionAddText}>Add Task</Text>
+            </TouchableOpacity>
+          </View>
 
           {sortedTasks.length === 0 ? (
             <Text style={styles.emptyText}>No tasks yet</Text>
@@ -313,6 +409,76 @@ export default function ProjectDetailScreen() {
           )}
         </View>
       </ScrollView>
+
+      <Modal visible={showEditProject} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Edit Project</Text>
+
+            <Text style={styles.inputLabel}>Project Name</Text>
+            <TextInput style={styles.input} value={editName} onChangeText={setEditName} placeholder="Project name" placeholderTextColor={colors.textSecondary} />
+
+            <Text style={styles.inputLabel}>Description</Text>
+            <TextInput style={[styles.input, styles.multiline]} value={editDescription} onChangeText={setEditDescription} multiline placeholder="Description" placeholderTextColor={colors.textSecondary} />
+
+            <Text style={styles.inputLabel}>Target Finish</Text>
+            <TextInput style={styles.input} value={editTargetEndDate} onChangeText={setEditTargetEndDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
+
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Saturday Work</Text>
+              <Switch
+                value={editSaturdayEnabled}
+                onValueChange={setEditSaturdayEnabled}
+                trackColor={{ false: colors.border, true: colors.primary + '88' }}
+                thumbColor={editSaturdayEnabled ? colors.primary : '#fff'}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={() => setShowEditProject(false)}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveProject} disabled={saving}>
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={showAddTask} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalWrap}>
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Add Task</Text>
+
+              <Text style={styles.inputLabel}>Task Name</Text>
+              <TextInput style={styles.input} value={newTaskName} onChangeText={setNewTaskName} placeholder="Task name" placeholderTextColor={colors.textSecondary} />
+
+              <Text style={styles.inputLabel}>Duration (working days)</Text>
+              <TextInput style={styles.input} value={newTaskDuration} onChangeText={setNewTaskDuration} keyboardType="number-pad" placeholder="5" placeholderTextColor={colors.textSecondary} />
+
+              <Text style={styles.inputLabel}>Quoted Hours</Text>
+              <TextInput style={styles.input} value={newTaskQuotedHours} onChangeText={setNewTaskQuotedHours} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
+
+              <Text style={styles.inputLabel}>Allocated Staff</Text>
+              <TextInput style={styles.input} value={newTaskAllocatedStaff} onChangeText={setNewTaskAllocatedStaff} keyboardType="number-pad" placeholder="0" placeholderTextColor={colors.textSecondary} />
+
+              <Text style={styles.inputLabel}>Manual Start Override</Text>
+              <TextInput style={styles.input} value={newTaskStartDate} onChangeText={setNewTaskStartDate} placeholder="YYYY-MM-DD optional" placeholderTextColor={colors.textSecondary} />
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => setShowAddTask(false)}>
+                  <Text style={styles.secondaryBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.primaryBtn} onPress={handleAddTask} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Create Task</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -333,6 +499,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     flex: 1,
     textAlign: 'center',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   content: { padding: spacing.md, paddingBottom: 80, gap: spacing.md },
   heroCard: {
@@ -389,7 +560,15 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadows.subtle,
   },
-  sectionTitle: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  sectionTitle: { ...typography.caption, color: colors.textSecondary },
+  sectionAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sectionAddText: { color: colors.primary, fontWeight: '700' },
   emptyText: { ...typography.body, color: colors.textSecondary },
   taskCard: {
     borderWidth: 1,
@@ -469,5 +648,84 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
+  },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  modalScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: 6,
+    marginTop: spacing.sm,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    color: colors.textPrimary,
+    fontSize: 16,
+  },
+  multiline: { minHeight: 88, textAlignVertical: 'top' },
+  toggleRow: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  toggleLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  secondaryBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSecondary,
+  },
+  secondaryBtnText: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+  },
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
   },
 });
