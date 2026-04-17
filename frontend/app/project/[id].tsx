@@ -1,8 +1,7 @@
 ﻿import React, { useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, TextInput, Modal,
-  KeyboardAvoidingView, Platform,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,29 +20,44 @@ import {
   getStaffingLabel,
 } from '../../components/theme';
 import { api } from '../../components/api';
-import GanttChart from '../../components/GanttChart';
+
+function getTaskReadiness(task: any) {
+  const deps = task.dependencies || [];
+  const hasDeps = deps.length > 0;
+  const status = task.status || 'not_started';
+
+  if (status === 'completed') return 'completed';
+  if (hasDeps && status === 'not_started') return 'blocked';
+  if (!hasDeps && status === 'not_started') return 'ready';
+  if (status === 'in_progress') return 'active';
+  return 'ready';
+}
+
+function getReadinessColor(readiness: string) {
+  switch (readiness) {
+    case 'completed': return colors.green;
+    case 'blocked': return colors.red;
+    case 'ready': return colors.primary;
+    case 'active': return colors.yellow;
+    default: return colors.border;
+  }
+}
+
+function getReadinessLabel(readiness: string) {
+  switch (readiness) {
+    case 'completed': return 'Done';
+    case 'blocked': return 'Blocked';
+    case 'ready': return 'Ready';
+    case 'active': return 'Active';
+    default: return 'Unknown';
+  }
+}
 
 export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'gantt' | 'list'>('gantt');
-  const [showAddTask, setShowAddTask] = useState(false);
-  const [showSaveTemplate, setShowSaveTemplate] = useState(false);
-  const [showEditProject, setShowEditProject] = useState(false);
-  const [taskName, setTaskName] = useState('');
-  const [taskDuration, setTaskDuration] = useState('5');
-  const [taskQuotedHours, setTaskQuotedHours] = useState('0');
-  const [taskAllocatedStaff, setTaskAllocatedStaff] = useState('0');
-  const [taskStartDate, setTaskStartDate] = useState('');
-  const [taskDeps, setTaskDeps] = useState<string[]>([]);
-  const [templateName, setTemplateName] = useState('');
-  const [editProjectName, setEditProjectName] = useState('');
-  const [editProjectDescription, setEditProjectDescription] = useState('');
-  const [editProjectStartDate, setEditProjectStartDate] = useState('');
-  const [editProjectTargetDate, setEditProjectTargetDate] = useState('');
-  const [editProjectSaturdayEnabled, setEditProjectSaturdayEnabled] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
 
   const loadProject = async () => {
@@ -54,6 +68,7 @@ export default function ProjectDetailScreen() {
       console.error('Failed to load project', e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -61,145 +76,9 @@ export default function ProjectDetailScreen() {
     if (id) loadProject();
   }, [id]));
 
-  const openAddTask = () => {
-    setTaskName('');
-    setTaskDuration('5');
-    setTaskQuotedHours('0');
-    setTaskAllocatedStaff('0');
-    setTaskStartDate('');
-    setTaskDeps([]);
-    setShowAddTask(true);
-  };
-
-  const openEditProject = () => {
-    if (!project) return;
-    setEditProjectName(project.name || '');
-    setEditProjectDescription(project.description || '');
-    setEditProjectStartDate(project.start_date || '');
-    setEditProjectTargetDate(project.target_end_date || '');
-    setEditProjectSaturdayEnabled(!!project.saturday_enabled);
-    setShowEditProject(true);
-  };
-
-  const handleAddTask = async () => {
-    if (!taskName.trim()) return;
-    setSaving(true);
-    try {
-      const maxOrder = project.tasks?.length || 0;
-      await api.createTask(id!, {
-        name: taskName.trim(),
-        duration_days: parseInt(taskDuration) || 5,
-        quoted_hours: parseFloat(taskQuotedHours) || 0,
-        allocated_staff_count: parseInt(taskAllocatedStaff) || 0,
-        order: maxOrder,
-        dependencies: taskDeps,
-        start_date: taskStartDate || null,
-        assigned_to: [],
-      });
-      setShowAddTask(false);
-      loadProject();
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleEditProject = async () => {
-    if (!editProjectName.trim()) {
-      Alert.alert('Error', 'Project name is required');
-      return;
-    }
-    if (!editProjectStartDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      Alert.alert('Error', 'Please enter a valid project start date (YYYY-MM-DD)');
-      return;
-    }
-    if (editProjectTargetDate && !editProjectTargetDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      Alert.alert('Error', 'Please enter a valid target finish date (YYYY-MM-DD)');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await api.updateProject(id!, {
-        name: editProjectName.trim(),
-        description: editProjectDescription.trim(),
-        start_date: editProjectStartDate,
-        target_end_date: editProjectTargetDate || null,
-        saturday_enabled: editProjectSaturdayEnabled,
-      });
-      setShowEditProject(false);
-      loadProject();
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveAsTemplate = async () => {
-    if (!templateName.trim()) return;
-    setSaving(true);
-    try {
-      await api.saveAsTemplate({
-        name: templateName.trim(),
-        description: `Template from ${project.name}`,
-        project_id: id!,
-      });
-      setTemplateName('');
-      setShowSaveTemplate(false);
-      Alert.alert('Success', 'Template saved!');
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteProject = () => {
-    Alert.alert('Delete Project', 'This will permanently delete the project and all its tasks.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.deleteProject(id!);
-            router.replace('/(tabs)/projects');
-          } catch (e: any) {
-            Alert.alert('Error', e.message);
-          }
-        },
-      },
-    ]);
-  };
-
-  const moveTask = async (taskId: string, direction: 'up' | 'down') => {
-    const tasks = project.tasks || [];
-    const idx = tasks.findIndex((t: any) => t.id === taskId);
-    if (idx < 0) return;
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= tasks.length) return;
-    const newOrder = tasks.map((t: any) => t.id);
-    [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
-    try {
-      await api.reorderTasks(id!, newOrder);
-      loadProject();
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    }
-  };
-
-  const handleSortByDate = async () => {
-    try {
-      await api.sortTasksByDate(id!);
-      loadProject();
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    }
-  };
-
-  const toggleDep = (depId: string) => {
-    setTaskDeps(prev => prev.includes(depId) ? prev.filter(d => d !== depId) : [...prev, depId]);
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadProject();
   };
 
   if (loading) {
@@ -213,7 +92,7 @@ export default function ProjectDetailScreen() {
   if (!project) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.center}><Text style={styles.errorText}>Project not found</Text></View>
+        <View style={styles.center}><Text style={{ color: colors.red }}>Project not found</Text></View>
       </SafeAreaView>
     );
   }
@@ -222,430 +101,171 @@ export default function ProjectDetailScreen() {
   const indicatorColor = getStatusColor(project.overall_indicator);
   const scheduleColor = getScheduleColor(project.schedule_status);
 
+  const blockedCount = tasks.filter((t: any) => getTaskReadiness(t) === 'blocked').length;
+  const readyCount = tasks.filter((t: any) => getTaskReadiness(t) === 'ready').length;
+  const activeCount = tasks.filter((t: any) => getTaskReadiness(t) === 'active').length;
+  const doneCount = tasks.filter((t: any) => getTaskReadiness(t) === 'completed').length;
+  const riskCount = tasks.filter((t: any) => ['under', 'unassigned'].includes(t.staffing_status)).length;
+
+  const progressPct = project.total_quoted_hours > 0
+    ? Math.min((project.total_logged_hours / project.total_quoted_hours) * 100, 100)
+    : 0;
+
+  const sortedTasks = [...tasks].sort((a: any, b: any) => {
+    const weight = (t: any) => {
+      const readiness = getTaskReadiness(t);
+      if (readiness === 'active') return 0;
+      if (readiness === 'ready') return 1;
+      if (readiness === 'blocked') return 2;
+      if (readiness === 'completed') return 3;
+      return 4;
+    };
+    return weight(a) - weight(b);
+  });
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity testID="back-to-projects-btn" onPress={() => router.back()}>
+        <TouchableOpacity testID="back-from-project-btn" onPress={() => router.back()}>
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{project.name}</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity testID="edit-project-btn" onPress={openEditProject}>
-            <Feather name="edit-2" size={18} color={colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity testID="project-menu-btn" onPress={handleDeleteProject}>
-            <Feather name="trash-2" size={20} color={colors.red} />
-          </TouchableOpacity>
-        </View>
+        <View style={{ width: 24 }} />
       </View>
 
-      <View style={styles.statsBar}>
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{tasks.length}</Text>
-          <Text style={styles.statLabel}>Tasks</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <Text style={styles.statValue}>{project.total_quoted_hours?.toFixed(0) || 0}</Text>
-          <Text style={styles.statLabel}>Quoted</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <Text style={[styles.statValue, { color: project.understaffed_tasks > 0 ? colors.red : colors.textPrimary }]}>
-            {project.understaffed_tasks || 0}
-          </Text>
-          <Text style={styles.statLabel}>Staff Risk</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.stat}>
-          <View style={[styles.statusBadge, { backgroundColor: indicatorColor + '20' }]}>
-            <Text style={[styles.statusBadgeText, { color: indicatorColor }]}>
-              {getStatusLabel(project.overall_indicator)}
-            </Text>
-          </View>
-        </View>
-      </View>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
+        <View style={[styles.heroCard, { borderLeftColor: indicatorColor }]}>
+          <Text style={styles.heroTitle}>{project.name}</Text>
+          {!!project.description && <Text style={styles.heroDesc}>{project.description}</Text>}
 
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryHeaderRow}>
-          <Text style={styles.summaryTitle}>Programme Summary</Text>
-          <View style={[styles.summaryPill, { backgroundColor: scheduleColor + '20' }]}>
-            <Text style={[styles.summaryPillText, { color: scheduleColor }]}>{getScheduleLabel(project.schedule_status)}</Text>
-          </View>
-        </View>
-        <View style={styles.summaryGrid}>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Start</Text>
-            <Text style={styles.summaryValue}>{project.start_date}</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Forecast Finish</Text>
-            <Text style={styles.summaryValue}>{project.forecast_end_date || project.end_date}</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Target Finish</Text>
-            <Text style={[styles.summaryValue, !project.target_end_date && styles.summaryMuted]}>
-              {project.target_end_date || 'Not set'}
-            </Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Text style={styles.summaryLabel}>Saturday Work</Text>
-            <Text style={styles.summaryValue}>{project.saturday_enabled ? 'On' : 'Off'}</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.viewToggle}>
-        <TouchableOpacity
-          testID="gantt-view-btn"
-          style={[styles.viewBtn, viewMode === 'gantt' && styles.viewBtnActive]}
-          onPress={() => setViewMode('gantt')}
-        >
-          <Feather name="bar-chart-2" size={16} color={viewMode === 'gantt' ? colors.primaryForeground : colors.textSecondary} />
-          <Text style={[styles.viewBtnText, viewMode === 'gantt' && styles.viewBtnTextActive]}>Gantt</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          testID="list-view-btn"
-          style={[styles.viewBtn, viewMode === 'list' && styles.viewBtnActive]}
-          onPress={() => setViewMode('list')}
-        >
-          <Feather name="list" size={16} color={viewMode === 'list' ? colors.primaryForeground : colors.textSecondary} />
-          <Text style={[styles.viewBtnText, viewMode === 'list' && styles.viewBtnTextActive]}>List</Text>
-        </TouchableOpacity>
-        <TouchableOpacity testID="sort-by-date-btn" style={styles.actionBtn} onPress={handleSortByDate}>
-          <Feather name="arrow-down" size={14} color={colors.primary} />
-          <Text style={styles.actionBtnText}>Sort by Date</Text>
-        </TouchableOpacity>
-        <TouchableOpacity testID="save-template-btn" style={styles.actionBtn} onPress={() => setShowSaveTemplate(true)}>
-          <Feather name="save" size={14} color={colors.primary} />
-          <Text style={styles.actionBtnText}>Template</Text>
-        </TouchableOpacity>
-      </View>
-
-      {viewMode === 'gantt' ? (
-        <GanttChart
-          tasks={tasks}
-          projectStart={project.start_date}
-          projectEnd={project.end_date}
-          onTaskPress={(taskId: string) => router.push(`/task/${taskId}`)}
-        />
-      ) : (
-        <ScrollView style={styles.listContainer} contentContainerStyle={{ paddingBottom: 100 }}>
-          {tasks.length === 0 ? (
-            <View style={styles.emptyTasks}>
-              <Feather name="inbox" size={40} color={colors.border} />
-              <Text style={styles.emptyText}>No tasks yet. Tap + to add.</Text>
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroMetaItem}>
+              <Feather name="calendar" size={15} color={colors.textSecondary} />
+              <Text style={styles.heroMetaText}>{project.start_date} → {project.forecast_end_date || project.end_date}</Text>
             </View>
+            <View style={[styles.inlineBadge, { backgroundColor: scheduleColor + '20' }]}>
+              <Text style={[styles.inlineBadgeText, { color: scheduleColor }]}>{getScheduleLabel(project.schedule_status)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.heroMetaRow}>
+            <View style={styles.heroMetaItem}>
+              <Feather name="target" size={15} color={scheduleColor} />
+              <Text style={[styles.heroMetaText, { color: scheduleColor }]}>{project.target_end_date || 'No target finish set'}</Text>
+            </View>
+            <View style={[styles.inlineBadge, { backgroundColor: indicatorColor + '20' }]}>
+              <Text style={[styles.inlineBadgeText, { color: indicatorColor }]}>{getStatusLabel(project.overall_indicator)}</Text>
+            </View>
+          </View>
+
+          <View style={styles.progressBarBg}>
+            <View style={[styles.progressBarFill, { width: `${progressPct}%`, backgroundColor: indicatorColor }]} />
+          </View>
+
+          <Text style={styles.progressText}>
+            {(project.total_logged_hours || 0).toFixed(1)} / {(project.total_quoted_hours || 0).toFixed(1)} hrs • {progressPct.toFixed(0)}%
+          </Text>
+        </View>
+
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Tasks</Text>
+            <Text style={styles.summaryValue}>{tasks.length}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Ready</Text>
+            <Text style={[styles.summaryValue, { color: colors.primary }]}>{readyCount}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Active</Text>
+            <Text style={[styles.summaryValue, { color: colors.yellow }]}>{activeCount}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Done</Text>
+            <Text style={[styles.summaryValue, { color: colors.green }]}>{doneCount}</Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Blocked</Text>
+            <Text style={[styles.summaryValue, { color: blockedCount > 0 ? colors.red : colors.textPrimary }]}>{blockedCount}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Staff Risk</Text>
+            <Text style={[styles.summaryValue, { color: riskCount > 0 ? colors.red : colors.textPrimary }]}>{riskCount}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Req Staff</Text>
+            <Text style={styles.summaryValue}>{project.total_required_staff || 0}</Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Alloc Staff</Text>
+            <Text style={styles.summaryValue}>{project.total_allocated_staff || 0}</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>TASKS</Text>
+
+          {sortedTasks.length === 0 ? (
+            <Text style={styles.emptyText}>No tasks yet</Text>
           ) : (
-            tasks.map((task: any, idx: number) => {
-              const taskColor = getStatusColor(task.progress_indicator);
+            sortedTasks.map((task: any) => {
+              const readiness = getTaskReadiness(task);
+              const readinessColor = getReadinessColor(readiness);
               const staffingColor = getStaffingColor(task.staffing_status);
-              const depNames = task.dependencies?.map((depId: string) => {
-                const dep = tasks.find((t: any) => t.id === depId);
-                return dep?.name || '';
-              }).filter(Boolean);
+              const depsCount = (task.dependencies || []).length;
+
               return (
-                <View key={task.id} style={styles.taskCard}>
-                  <TouchableOpacity
-                    testID={`task-item-${task.id}`}
-                    style={styles.taskContent}
-                    onPress={() => router.push(`/task/${task.id}`)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.taskHeader}>
-                      <View style={[styles.taskDot, { backgroundColor: taskColor }]} />
-                      <Text style={styles.taskName} numberOfLines={1}>{task.name}</Text>
-                    </View>
-                    <View style={styles.taskDates}>
-                      <View style={styles.dateChip}>
-                        <Feather name="play" size={10} color={colors.green} />
-                        <Text style={styles.dateText}>{task.start_date}</Text>
-                      </View>
-                      <Feather name="arrow-right" size={12} color={colors.textSecondary} />
-                      <View style={styles.dateChip}>
-                        <Feather name="square" size={10} color={colors.red} />
-                        <Text style={styles.dateText}>{task.end_date}</Text>
-                      </View>
-                      <Text style={styles.durationChip}>{task.duration_days}d</Text>
-                    </View>
-                    {depNames && depNames.length > 0 && (
-                      <View style={styles.depRow}>
-                        <Feather name="link" size={12} color={colors.textSecondary} />
-                        <Text style={styles.depText}>After: {depNames.join(', ')}</Text>
-                      </View>
-                    )}
-                    <View style={styles.taskFooterWrap}>
-                      <Text style={styles.taskHours}>
-                        {task.logged_hours?.toFixed(1) || 0} / {task.quoted_hours} hrs
-                      </Text>
-                      <View style={styles.footerBadgeRow}>
-                        <View style={styles.staffBadge}>
-                          <Feather name="briefcase" size={12} color={colors.textSecondary} />
-                          <Text style={styles.staffText}>Alloc {task.allocated_staff_count || 0}</Text>
-                        </View>
-                        <View style={styles.staffBadge}>
-                          <Feather name="users" size={12} color={colors.secondary} />
-                          <Text style={styles.staffText}>Req {task.required_staff || 0}</Text>
-                        </View>
-                        <View style={[styles.indicatorBadge, { backgroundColor: staffingColor + '20' }]}>
-                          <Text style={[styles.indicatorText, { color: staffingColor }]}>
-                            {getStaffingLabel(task.staffing_status)}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                  <View style={styles.reorderCol}>
-                    <TouchableOpacity
-                      testID={`move-up-${task.id}`}
-                      style={[styles.reorderBtn, idx === 0 && styles.reorderBtnDisabled]}
-                      onPress={() => moveTask(task.id, 'up')}
-                      disabled={idx === 0}
-                    >
-                      <Feather name="chevron-up" size={18} color={idx === 0 ? colors.border : colors.textPrimary} />
-                    </TouchableOpacity>
-                    <Text style={styles.orderNum}>{idx + 1}</Text>
-                    <TouchableOpacity
-                      testID={`move-down-${task.id}`}
-                      style={[styles.reorderBtn, idx === tasks.length - 1 && styles.reorderBtnDisabled]}
-                      onPress={() => moveTask(task.id, 'down')}
-                      disabled={idx === tasks.length - 1}
-                    >
-                      <Feather name="chevron-down" size={18} color={idx === tasks.length - 1 ? colors.border : colors.textPrimary} />
-                    </TouchableOpacity>
+                <TouchableOpacity
+                  key={task.id}
+                  style={styles.taskCard}
+                  onPress={() => router.push(`/task/${task.id}`)}
+                  activeOpacity={0.75}
+                >
+                  <View style={styles.taskTopRow}>
+                    <Text style={styles.taskTitle} numberOfLines={1}>{task.name}</Text>
+                    <Feather name="chevron-right" size={18} color={colors.textSecondary} />
                   </View>
-                </View>
+
+                  <View style={styles.taskMetaRow}>
+                    <View style={styles.taskMetaItem}>
+                      <Feather name="calendar" size={14} color={colors.textSecondary} />
+                      <Text style={styles.taskMetaText}>{task.start_date} → {task.end_date}</Text>
+                    </View>
+                    <View style={[styles.inlineBadge, { backgroundColor: readinessColor + '20' }]}>
+                      <Text style={[styles.inlineBadgeText, { color: readinessColor }]}>
+                        {getReadinessLabel(readiness)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.taskMetaRow}>
+                    <View style={styles.taskMetaItem}>
+                      <Feather name="git-merge" size={14} color={colors.textSecondary} />
+                      <Text style={styles.taskMetaText}>{depsCount} predecessor{depsCount === 1 ? '' : 's'}</Text>
+                    </View>
+                    <View style={[styles.inlineBadge, { backgroundColor: staffingColor + '20' }]}>
+                      <Text style={[styles.inlineBadgeText, { color: staffingColor }]}>
+                        {getStaffingLabel(task.staffing_status)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.taskBottomRow}>
+                    <Text style={styles.taskHours}>{(task.logged_hours || 0).toFixed(1)} / {task.quoted_hours || 0} hrs</Text>
+                    <Text style={styles.taskStaff}>Req {task.required_staff || 0} • Alloc {task.allocated_staff_count || 0}</Text>
+                  </View>
+                </TouchableOpacity>
               );
             })
           )}
-        </ScrollView>
-      )}
-
-      <TouchableOpacity
-        testID="add-task-btn"
-        style={styles.fab}
-        onPress={openAddTask}
-        activeOpacity={0.8}
-      >
-        <Feather name="plus" size={28} color={colors.primaryForeground} />
-      </TouchableOpacity>
-
-      <Modal visible={showAddTask} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add Task</Text>
-                <TouchableOpacity testID="close-add-task-btn" onPress={() => setShowAddTask(false)}>
-                  <Feather name="x" size={24} color={colors.textPrimary} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.label}>Task Name *</Text>
-              <TextInput
-                testID="new-task-name-input"
-                style={styles.input}
-                placeholder="e.g. Steel Partitions"
-                placeholderTextColor={colors.textSecondary}
-                value={taskName}
-                onChangeText={setTaskName}
-              />
-
-              <Text style={styles.label}>Start Date (leave blank for auto from dependencies)</Text>
-              <TextInput
-                testID="new-task-start-date-input"
-                style={styles.input}
-                placeholder="YYYY-MM-DD or leave blank"
-                placeholderTextColor={colors.textSecondary}
-                value={taskStartDate}
-                onChangeText={setTaskStartDate}
-                keyboardType="numbers-and-punctuation"
-              />
-
-              <View style={styles.rowInputs}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Duration (days)</Text>
-                  <TextInput
-                    testID="new-task-duration-input"
-                    style={styles.input}
-                    placeholder="5"
-                    placeholderTextColor={colors.textSecondary}
-                    value={taskDuration}
-                    onChangeText={setTaskDuration}
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={{ width: spacing.sm }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Quoted Hours</Text>
-                  <TextInput
-                    testID="new-task-hours-input"
-                    style={styles.input}
-                    placeholder="0"
-                    placeholderTextColor={colors.textSecondary}
-                    value={taskQuotedHours}
-                    onChangeText={setTaskQuotedHours}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-
-              <Text style={styles.label}>Allocated Staff</Text>
-              <TextInput
-                testID="new-task-allocated-staff-input"
-                style={styles.input}
-                placeholder="0"
-                placeholderTextColor={colors.textSecondary}
-                value={taskAllocatedStaff}
-                onChangeText={setTaskAllocatedStaff}
-                keyboardType="number-pad"
-              />
-
-              {tasks.length > 0 && (
-                <>
-                  <Text style={styles.label}>Link After (Dependencies)</Text>
-                  <Text style={styles.hint}>This task starts after selected tasks finish</Text>
-                  <View style={styles.depSelectContainer}>
-                    {tasks.map((t: any) => (
-                      <TouchableOpacity
-                        testID={`dep-select-${t.id}`}
-                        key={t.id}
-                        style={[styles.depChip, taskDeps.includes(t.id) && styles.depChipActive]}
-                        onPress={() => toggleDep(t.id)}
-                      >
-                        {taskDeps.includes(t.id) && <Feather name="check" size={12} color={colors.primaryForeground} />}
-                        <Text style={[styles.depChipText, taskDeps.includes(t.id) && styles.depChipTextActive]}>
-                          {t.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
-              <TouchableOpacity
-                testID="submit-add-task-btn"
-                style={[styles.submitBtn, saving && { opacity: 0.7 }]}
-                onPress={handleAddTask}
-                disabled={saving}
-              >
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Add Task</Text>}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={showEditProject} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Edit Project</Text>
-                <TouchableOpacity testID="close-edit-project-btn" onPress={() => setShowEditProject(false)}>
-                  <Feather name="x" size={24} color={colors.textPrimary} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.label}>Project Name *</Text>
-              <TextInput
-                testID="edit-project-name-input"
-                style={styles.input}
-                value={editProjectName}
-                onChangeText={setEditProjectName}
-              />
-
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                testID="edit-project-description-input"
-                style={[styles.input, styles.textArea]}
-                value={editProjectDescription}
-                onChangeText={setEditProjectDescription}
-                multiline
-                numberOfLines={3}
-              />
-
-              <Text style={styles.label}>Project Start Date</Text>
-              <TextInput
-                testID="edit-project-start-date-input"
-                style={styles.input}
-                value={editProjectStartDate}
-                onChangeText={setEditProjectStartDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="numbers-and-punctuation"
-              />
-
-              <Text style={styles.label}>Target Finish Date</Text>
-              <TextInput
-                testID="edit-project-target-date-input"
-                style={styles.input}
-                value={editProjectTargetDate}
-                onChangeText={setEditProjectTargetDate}
-                placeholder="YYYY-MM-DD or blank"
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="numbers-and-punctuation"
-              />
-
-              <View style={styles.toggleRow}>
-                <View>
-                  <Text style={styles.label}>Saturday Work</Text>
-                  <Text style={styles.hint}>6 hours per Saturday</Text>
-                </View>
-                <TouchableOpacity
-                  testID="edit-project-saturday-toggle"
-                  style={[styles.toggle, editProjectSaturdayEnabled && styles.toggleActive]}
-                  onPress={() => setEditProjectSaturdayEnabled(!editProjectSaturdayEnabled)}
-                >
-                  <View style={[styles.toggleKnob, editProjectSaturdayEnabled && styles.toggleKnobActive]} />
-                </TouchableOpacity>
-              </View>
-
-              <TouchableOpacity
-                testID="submit-edit-project-btn"
-                style={[styles.submitBtn, saving && { opacity: 0.7 }]}
-                onPress={handleEditProject}
-                disabled={saving}
-              >
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Save Project</Text>}
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={showSaveTemplate} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Save as Template</Text>
-              <TouchableOpacity testID="close-save-template-btn" onPress={() => setShowSaveTemplate(false)}>
-                <Feather name="x" size={24} color={colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.modalDesc}>
-              Save this project's task structure as a reusable template. Hours, dates and assignments will be stripped.
-            </Text>
-            <Text style={styles.label}>Template Name *</Text>
-            <TextInput
-              testID="template-name-input"
-              style={styles.input}
-              placeholder="e.g. My Custom Fitout"
-              placeholderTextColor={colors.textSecondary}
-              value={templateName}
-              onChangeText={setTemplateName}
-            />
-            <TouchableOpacity
-              testID="submit-save-template-btn"
-              style={[styles.submitBtn, saving && { opacity: 0.7 }]}
-              onPress={handleSaveAsTemplate}
-              disabled={saving}
-            >
-              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Save Template</Text>}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -653,27 +273,68 @@ export default function ProjectDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  errorText: { ...typography.h3, color: colors.red },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  headerTitle: { ...typography.h2, color: colors.textPrimary, flex: 1, marginHorizontal: spacing.md },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  statsBar: {
-    flexDirection: 'row', backgroundColor: colors.surface,
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
-    borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center',
+  headerTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    flex: 1,
+    textAlign: 'center',
   },
-  stat: { flex: 1, alignItems: 'center' },
-  statValue: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
-  statLabel: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
-  statDivider: { width: 1, height: 30, backgroundColor: colors.border },
-  statusBadge: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill },
-  statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  content: { padding: spacing.md, paddingBottom: 80, gap: spacing.md },
+  heroCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderLeftWidth: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.subtle,
+  },
+  heroTitle: { ...typography.h2, color: colors.textPrimary },
+  heroDesc: { ...typography.body, color: colors.textSecondary, marginTop: 4, marginBottom: spacing.sm },
+  heroMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  heroMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  heroMetaText: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+  progressBarBg: {
+    height: 8,
+    backgroundColor: colors.border,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: spacing.md,
+  },
+  progressBarFill: { height: 8, borderRadius: 4 },
+  progressText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600', marginTop: spacing.sm },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   summaryCard: {
-    margin: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: '23%',
+    flex: 1,
+    ...shadows.subtle,
+  },
+  summaryLabel: { fontSize: 12, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' },
+  summaryValue: { fontSize: 24, fontWeight: '800', color: colors.textPrimary, marginTop: 6 },
+  sectionCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.md,
@@ -681,137 +342,63 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     ...shadows.subtle,
   },
-  summaryHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  summaryTitle: { ...typography.h3, fontSize: 16, color: colors.textPrimary },
-  summaryPill: { paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.pill },
-  summaryPillText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.sm },
-  summaryItem: { width: '50%' },
-  summaryLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 2 },
-  summaryValue: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  summaryMuted: { color: colors.textSecondary },
-  viewToggle: {
-    flexDirection: 'row', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
-    gap: spacing.xs, backgroundColor: colors.surfaceSecondary, flexWrap: 'wrap',
-  },
-  viewBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: colors.border,
-  },
-  viewBtnActive: { backgroundColor: colors.secondary, borderColor: colors.secondary },
-  viewBtnText: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  viewBtnTextActive: { color: colors.primaryForeground },
-  actionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: spacing.sm, paddingVertical: spacing.sm,
-    borderRadius: radius.pill, backgroundColor: colors.surface,
-    borderWidth: 1, borderColor: colors.primary + '40',
-  },
-  actionBtnText: { fontSize: 12, fontWeight: '600', color: colors.primary },
-  listContainer: { flex: 1, padding: spacing.sm },
-  emptyTasks: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { ...typography.body, color: colors.textSecondary, marginTop: spacing.md },
+  sectionTitle: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.md },
+  emptyText: { ...typography.body, color: colors.textSecondary },
   taskCard: {
-    flexDirection: 'row', backgroundColor: colors.surface,
-    borderRadius: radius.lg, marginBottom: spacing.sm,
-    borderWidth: 1, borderColor: colors.border, ...shadows.subtle, overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    marginBottom: spacing.sm,
   },
-  taskContent: { flex: 1, padding: spacing.md },
-  taskHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  taskDot: { width: 10, height: 10, borderRadius: 5, marginRight: spacing.sm },
-  taskName: { ...typography.h3, fontSize: 15, color: colors.textPrimary, flex: 1 },
-  taskDates: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    marginBottom: spacing.xs, flexWrap: 'wrap',
+  taskTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
-  dateChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: colors.surfaceSecondary, paddingHorizontal: 8,
-    paddingVertical: 3, borderRadius: radius.sm,
+  taskTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    flex: 1,
   },
-  dateText: { fontSize: 12, color: colors.textPrimary, fontWeight: '500' },
-  durationChip: {
-    fontSize: 12, fontWeight: '700', color: colors.primary,
-    backgroundColor: colors.primary + '10', paddingHorizontal: 8,
-    paddingVertical: 3, borderRadius: radius.sm,
-  },
-  depRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
+  taskMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing.sm,
     marginBottom: spacing.xs,
   },
-  depText: { fontSize: 11, color: colors.textSecondary, fontStyle: 'italic' },
-  taskFooterWrap: { gap: spacing.xs },
-  footerBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexWrap: 'wrap' },
-  taskHours: { fontSize: 12, color: colors.textSecondary, fontWeight: '500' },
-  staffBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: colors.surfaceSecondary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill,
+  taskMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
   },
-  staffText: { fontSize: 11, color: colors.secondary, fontWeight: '600' },
-  indicatorBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.pill },
-  indicatorText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  reorderCol: {
-    width: 44, alignItems: 'center', justifyContent: 'center',
-    borderLeftWidth: 1, borderLeftColor: colors.border, backgroundColor: colors.surfaceSecondary,
+  taskMetaText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '500',
   },
-  reorderBtn: { padding: 6 },
-  reorderBtnDisabled: { opacity: 0.3 },
-  orderNum: { fontSize: 12, fontWeight: '700', color: colors.textSecondary },
-  fab: {
-    position: 'absolute', bottom: 24, right: 24,
-    width: 60, height: 60, borderRadius: 30,
-    backgroundColor: colors.primary, justifyContent: 'center',
-    alignItems: 'center', ...shadows.medium,
+  taskBottomRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    gap: spacing.sm,
   },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalContent: {
-    backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: spacing.lg, paddingBottom: spacing.xxl,
+  taskHours: { fontSize: 12, color: colors.textSecondary, fontWeight: '700' },
+  taskStaff: { fontSize: 12, color: colors.textSecondary, fontWeight: '700', textAlign: 'right' },
+  inlineBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
   },
-  modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: spacing.md,
+  inlineBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
-  modalTitle: { ...typography.h2, color: colors.textPrimary },
-  modalDesc: { ...typography.body, color: colors.textSecondary, marginBottom: spacing.md },
-  label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs, marginTop: spacing.sm },
-  hint: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
-  input: {
-    height: 48, borderWidth: 1.5, borderColor: colors.border,
-    borderRadius: radius.md, paddingHorizontal: spacing.md,
-    fontSize: 16, color: colors.textPrimary, backgroundColor: colors.background,
-  },
-  textArea: { height: 80, textAlignVertical: 'top', paddingTop: spacing.sm },
-  rowInputs: { flexDirection: 'row' },
-  depSelectContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  depChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border,
-  },
-  depChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  depChipText: { fontSize: 13, fontWeight: '500', color: colors.textPrimary },
-  depChipTextActive: { color: colors.primaryForeground },
-  toggleRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border,
-  },
-  toggle: {
-    width: 50, height: 28, borderRadius: 14,
-    backgroundColor: colors.border, justifyContent: 'center', padding: 2,
-  },
-  toggleActive: { backgroundColor: colors.primary },
-  toggleKnob: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: '#fff', ...shadows.subtle,
-  },
-  toggleKnobActive: { alignSelf: 'flex-end' },
-  submitBtn: {
-    height: 52, backgroundColor: colors.primary, borderRadius: radius.md,
-    justifyContent: 'center', alignItems: 'center', marginTop: spacing.lg,
-  },
-  submitBtnText: { fontSize: 17, fontWeight: '700', color: colors.primaryForeground },
 });
-
