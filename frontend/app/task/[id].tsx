@@ -1,13 +1,23 @@
-import React, { useState, useCallback, useEffect } from 'react';
+﻿import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, Alert, TextInput, Modal,
-  KeyboardAvoidingView, Platform, FlatList,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radius, typography, shadows, getStatusColor, getStatusLabel } from '../../components/theme';
+import {
+  colors,
+  spacing,
+  radius,
+  typography,
+  shadows,
+  getStatusColor,
+  getStatusLabel,
+  getStaffingColor,
+  getStaffingLabel,
+} from '../../components/theme';
 import { api } from '../../components/api';
 import { useUser } from '../../contexts/UserContext';
 
@@ -27,6 +37,7 @@ export default function TaskDetailScreen() {
   const [editName, setEditName] = useState('');
   const [editDuration, setEditDuration] = useState('');
   const [editQuotedHours, setEditQuotedHours] = useState('');
+  const [editAllocatedStaff, setEditAllocatedStaff] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeps, setEditDeps] = useState<string[]>([]);
   const [allTasks, setAllTasks] = useState<any[]>([]);
@@ -43,7 +54,6 @@ export default function TaskDetailScreen() {
       setTask(taskData);
       setHours(hoursData);
       setTeam(teamData);
-      // Load sibling tasks for dependency management
       if (taskData?.project_id) {
         const projectData = await api.getProject(taskData.project_id);
         setAllTasks((projectData.tasks || []).filter((t: any) => t.id !== id));
@@ -99,6 +109,7 @@ export default function TaskDetailScreen() {
       if (editName.trim()) updates.name = editName.trim();
       if (editDuration) updates.duration_days = parseInt(editDuration);
       if (editQuotedHours) updates.quoted_hours = parseFloat(editQuotedHours);
+      if (editAllocatedStaff) updates.allocated_staff_count = parseInt(editAllocatedStaff);
       if (editStartDate) updates.start_date = editStartDate;
       updates.dependencies = editDeps;
       await api.updateTask(id!, updates);
@@ -167,11 +178,11 @@ export default function TaskDetailScreen() {
   }
 
   const indicatorColor = getStatusColor(task.progress_indicator);
+  const staffingColor = getStaffingColor(task.staffing_status);
   const progressPct = task.quoted_hours > 0 ? Math.min((task.logged_hours / task.quoted_hours) * 100, 100) : 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity testID="back-from-task-btn" onPress={() => router.back()}>
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
@@ -181,6 +192,7 @@ export default function TaskDetailScreen() {
           setEditName(task.name);
           setEditDuration(String(task.duration_days));
           setEditQuotedHours(String(task.quoted_hours));
+          setEditAllocatedStaff(String(task.allocated_staff_count || 0));
           setEditStartDate(task.start_date || '');
           setEditDeps(task.dependencies || []);
           setShowEditTask(true);
@@ -190,7 +202,6 @@ export default function TaskDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {/* Status Indicator Card */}
         <View style={[styles.indicatorCard, { borderLeftColor: indicatorColor }]}>
           <View style={styles.indicatorRow}>
             <View>
@@ -208,13 +219,12 @@ export default function TaskDetailScreen() {
           </View>
         </View>
 
-        {/* Details Card */}
         <View style={styles.detailsCard}>
           <Text style={styles.sectionTitle}>DETAILS</Text>
           <View style={styles.detailRow}>
             <Feather name="calendar" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Schedule</Text>
-            <Text style={styles.detailValue}>{task.start_date} → {task.end_date}</Text>
+            <Text style={styles.detailValue}>{task.start_date} â†’ {task.end_date}</Text>
           </View>
           <View style={styles.detailRow}>
             <Feather name="clock" size={16} color={colors.textSecondary} />
@@ -227,6 +237,18 @@ export default function TaskDetailScreen() {
             <Text style={[styles.detailValue, { fontWeight: '700', color: colors.primary }]}>
               {task.required_staff > 0 ? `${task.required_staff} people` : 'Set quoted hours'}
             </Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Feather name="briefcase" size={16} color={colors.textSecondary} />
+            <Text style={styles.detailLabel}>Allocated Staff</Text>
+            <Text style={styles.detailValue}>{task.allocated_staff_count || 0} people</Text>
+          </View>
+          <View style={styles.detailRow}>
+            <Feather name="shield" size={16} color={colors.textSecondary} />
+            <Text style={styles.detailLabel}>Staffing</Text>
+            <View style={[styles.smallBadge, { backgroundColor: staffingColor + '20' }]}>
+              <Text style={[styles.smallBadgeText, { color: staffingColor }]}>{getStaffingLabel(task.staffing_status)}</Text>
+            </View>
           </View>
           <View style={styles.detailRow}>
             <Feather name="flag" size={16} color={colors.textSecondary} />
@@ -248,7 +270,6 @@ export default function TaskDetailScreen() {
           </View>
         </View>
 
-        {/* Hour Logs */}
         <View style={styles.logsCard}>
           <View style={styles.logsSectionHeader}>
             <Text style={styles.sectionTitle}>HOUR LOGS</Text>
@@ -280,7 +301,6 @@ export default function TaskDetailScreen() {
           )}
         </View>
 
-        {/* Delete button */}
         <TouchableOpacity
           testID="delete-task-btn"
           style={styles.deleteBtn}
@@ -291,7 +311,6 @@ export default function TaskDetailScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Log Hours Modal */}
       <Modal visible={showLogHours} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -368,7 +387,6 @@ export default function TaskDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Edit Task Modal */}
       <Modal visible={showEditTask} animationType="slide" transparent>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}>
@@ -419,6 +437,14 @@ export default function TaskDetailScreen() {
                   />
                 </View>
               </View>
+              <Text style={styles.label}>Allocated Staff</Text>
+              <TextInput
+                testID="edit-task-allocated-staff-input"
+                style={styles.input}
+                value={editAllocatedStaff}
+                onChangeText={setEditAllocatedStaff}
+                keyboardType="number-pad"
+              />
               {allTasks.length > 0 && (
                 <>
                   <Text style={styles.label}>Link After (Dependencies)</Text>
@@ -435,9 +461,7 @@ export default function TaskDetailScreen() {
                           editDeps.includes(t.id) && styles.memberChipActive,
                         ]}
                         onPress={() => {
-                          setEditDeps(prev =>
-                            prev.includes(t.id) ? prev.filter(d => d !== t.id) : [...prev, t.id]
-                          );
+                          setEditDeps(prev => prev.includes(t.id) ? prev.filter(d => d !== t.id) : [...prev, t.id]);
                         }}
                       >
                         {editDeps.includes(t.id) && <Feather name="check" size={12} color={colors.primaryForeground} />}
@@ -506,6 +530,8 @@ const styles = StyleSheet.create({
   },
   detailLabel: { fontSize: 14, color: colors.textSecondary, marginLeft: spacing.sm, width: 100 },
   detailValue: { fontSize: 14, color: colors.textPrimary, fontWeight: '500', flex: 1, textAlign: 'right' },
+  smallBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, marginLeft: 'auto' },
+  smallBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   statusRow: { flexDirection: 'row', gap: spacing.xs, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' },
   statusChip: {
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill,
@@ -563,6 +589,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill,
     backgroundColor: colors.surfaceSecondary, marginRight: spacing.sm,
     borderWidth: 1, borderColor: colors.border,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
   },
   memberChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   memberChipText: { fontSize: 14, fontWeight: '500', color: colors.textPrimary },
@@ -573,3 +600,4 @@ const styles = StyleSheet.create({
   },
   submitBtnText: { fontSize: 17, fontWeight: '700', color: colors.primaryForeground },
 });
+
