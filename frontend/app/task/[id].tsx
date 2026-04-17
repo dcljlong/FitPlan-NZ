@@ -24,23 +24,27 @@ import { useUser } from '../../contexts/UserContext';
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [task, setTask] = useState<any>(null);
+  const [project, setProject] = useState<any>(null);
   const [hours, setHours] = useState<any[]>([]);
   const [team, setTeam] = useState<any[]>([]);
+  const [allTasks, setAllTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLogHours, setShowLogHours] = useState(false);
   const [showEditTask, setShowEditTask] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const [logHoursVal, setLogHoursVal] = useState('');
   const [logDate, setLogDate] = useState('');
   const [logNotes, setLogNotes] = useState('');
   const [logMember, setLogMember] = useState('');
-  const [saving, setSaving] = useState(false);
+
   const [editName, setEditName] = useState('');
   const [editDuration, setEditDuration] = useState('');
   const [editQuotedHours, setEditQuotedHours] = useState('');
   const [editAllocatedStaff, setEditAllocatedStaff] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeps, setEditDeps] = useState<string[]>([]);
-  const [allTasks, setAllTasks] = useState<any[]>([]);
+
   const router = useRouter();
   const { userName } = useUser();
 
@@ -51,11 +55,14 @@ export default function TaskDetailScreen() {
         api.getTaskHours(id!),
         api.getTeam(),
       ]);
+
       setTask(taskData);
       setHours(hoursData);
       setTeam(teamData);
+
       if (taskData?.project_id) {
         const projectData = await api.getProject(taskData.project_id);
+        setProject(projectData);
         setAllTasks((projectData.tasks || []).filter((t: any) => t.id !== id));
       }
     } catch (e) {
@@ -65,13 +72,32 @@ export default function TaskDetailScreen() {
     }
   };
 
-  useFocusEffect(useCallback(() => { if (id) loadData(); }, [id]));
+  useFocusEffect(useCallback(() => {
+    if (id) loadData();
+  }, [id]));
 
   useEffect(() => {
     const today = new Date();
-    setLogDate(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
+    setLogDate(
+      `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    );
     setLogMember(userName || '');
   }, [userName]);
+
+  const openEditTask = () => {
+    if (!task) return;
+    setEditName(task.name || '');
+    setEditDuration(String(task.duration_days || 0));
+    setEditQuotedHours(String(task.quoted_hours || 0));
+    setEditAllocatedStaff(String(task.allocated_staff_count || 0));
+    setEditStartDate(task.start_date || '');
+    setEditDeps(task.dependencies || []);
+    setShowEditTask(true);
+  };
+
+  const toggleDep = (depId: string) => {
+    setEditDeps((prev) => prev.includes(depId) ? prev.filter((d) => d !== depId) : [...prev, depId]);
+  };
 
   const handleLogHours = async () => {
     const hrs = parseFloat(logHoursVal);
@@ -80,9 +106,10 @@ export default function TaskDetailScreen() {
       return;
     }
     if (!logMember.trim()) {
-      Alert.alert('Error', 'Please select a team member');
+      Alert.alert('Error', 'Please select or enter a team member');
       return;
     }
+
     setSaving(true);
     try {
       await api.logHours(id!, {
@@ -103,15 +130,33 @@ export default function TaskDetailScreen() {
   };
 
   const handleEditTask = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Error', 'Task name is required');
+      return;
+    }
+    if (!editDuration || parseInt(editDuration) <= 0) {
+      Alert.alert('Error', 'Duration must be at least 1 day');
+      return;
+    }
+    if (editStartDate && !editStartDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      Alert.alert('Error', 'Manual start date must be YYYY-MM-DD');
+      return;
+    }
+
     setSaving(true);
     try {
-      const updates: any = {};
-      if (editName.trim()) updates.name = editName.trim();
-      if (editDuration) updates.duration_days = parseInt(editDuration);
-      if (editQuotedHours) updates.quoted_hours = parseFloat(editQuotedHours);
-      if (editAllocatedStaff) updates.allocated_staff_count = parseInt(editAllocatedStaff);
-      if (editStartDate) updates.start_date = editStartDate;
-      updates.dependencies = editDeps;
+      const updates: any = {
+        name: editName.trim(),
+        duration_days: parseInt(editDuration) || 1,
+        quoted_hours: parseFloat(editQuotedHours) || 0,
+        allocated_staff_count: parseInt(editAllocatedStaff) || 0,
+        dependencies: editDeps,
+      };
+
+      if (editStartDate.trim()) {
+        updates.start_date = editStartDate.trim();
+      }
+
       await api.updateTask(id!, updates);
       setShowEditTask(false);
       loadData();
@@ -122,11 +167,23 @@ export default function TaskDetailScreen() {
     }
   };
 
+  const handleClearManualDate = async () => {
+    try {
+      await api.clearDateOverride(id!);
+      setEditStartDate('');
+      loadData();
+      Alert.alert('Updated', 'Task date override cleared. Task will now auto-schedule from dependencies.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  };
+
   const handleDeleteTask = () => {
     Alert.alert('Delete Task', `Delete "${task?.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive',
+        text: 'Delete',
+        style: 'destructive',
         onPress: async () => {
           try {
             await api.deleteTask(id!);
@@ -152,7 +209,8 @@ export default function TaskDetailScreen() {
     Alert.alert('Delete Log', 'Remove this hour log?', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive',
+        text: 'Delete',
+        style: 'destructive',
         onPress: async () => {
           await api.deleteHourLog(logId);
           loadData();
@@ -180,6 +238,9 @@ export default function TaskDetailScreen() {
   const indicatorColor = getStatusColor(task.progress_indicator);
   const staffingColor = getStaffingColor(task.staffing_status);
   const progressPct = task.quoted_hours > 0 ? Math.min((task.logged_hours / task.quoted_hours) * 100, 100) : 0;
+  const predecessorNames = (allTasks || [])
+    .filter((t: any) => (task.dependencies || []).includes(t.id))
+    .map((t: any) => t.name);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -188,15 +249,7 @@ export default function TaskDetailScreen() {
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{task.name}</Text>
-        <TouchableOpacity testID="edit-task-btn" onPress={() => {
-          setEditName(task.name);
-          setEditDuration(String(task.duration_days));
-          setEditQuotedHours(String(task.quoted_hours));
-          setEditAllocatedStaff(String(task.allocated_staff_count || 0));
-          setEditStartDate(task.start_date || '');
-          setEditDeps(task.dependencies || []);
-          setShowEditTask(true);
-        }}>
+        <TouchableOpacity testID="edit-task-btn" onPress={openEditTask}>
           <Feather name="edit-2" size={20} color={colors.primary} />
         </TouchableOpacity>
       </View>
@@ -207,7 +260,7 @@ export default function TaskDetailScreen() {
             <View>
               <Text style={styles.indicatorLabel}>{getStatusLabel(task.progress_indicator)}</Text>
               <Text style={styles.indicatorHours}>
-                {task.logged_hours?.toFixed(1)} / {task.quoted_hours} hours
+                {(task.logged_hours || 0).toFixed(1)} / {task.quoted_hours || 0} hours
               </Text>
             </View>
             <View style={styles.circleProgress}>
@@ -220,41 +273,63 @@ export default function TaskDetailScreen() {
         </View>
 
         <View style={styles.detailsCard}>
-          <Text style={styles.sectionTitle}>DETAILS</Text>
+          <Text style={styles.sectionTitle}>PLANNING</Text>
+
           <View style={styles.detailRow}>
             <Feather name="calendar" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Schedule</Text>
-            <Text style={styles.detailValue}>{task.start_date} â†’ {task.end_date}</Text>
+            <Text style={styles.detailValue}>{task.start_date} → {task.end_date}</Text>
           </View>
+
           <View style={styles.detailRow}>
             <Feather name="clock" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Duration</Text>
             <Text style={styles.detailValue}>{task.duration_days} working days</Text>
           </View>
+
+          <View style={styles.detailRow}>
+            <Feather name="git-merge" size={16} color={colors.textSecondary} />
+            <Text style={styles.detailLabel}>Predecessors</Text>
+            <Text style={styles.detailValue}>
+              {predecessorNames.length > 0 ? predecessorNames.join(', ') : 'None'}
+            </Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Feather name="bar-chart-2" size={16} color={colors.textSecondary} />
+            <Text style={styles.detailLabel}>Quoted Hours</Text>
+            <Text style={styles.detailValue}>{task.quoted_hours || 0}</Text>
+          </View>
+
           <View style={styles.detailRow}>
             <Feather name="users" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Required Staff</Text>
             <Text style={[styles.detailValue, { fontWeight: '700', color: colors.primary }]}>
-              {task.required_staff > 0 ? `${task.required_staff} people` : 'Set quoted hours'}
+              {task.required_staff > 0 ? `${task.required_staff}` : 'Set quoted hours'}
             </Text>
           </View>
+
           <View style={styles.detailRow}>
-            <Feather name="briefcase" size={16} color={colors.textSecondary} />
+            <Feather name="user-check" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Allocated Staff</Text>
-            <Text style={styles.detailValue}>{task.allocated_staff_count || 0} people</Text>
+            <Text style={styles.detailValue}>{task.allocated_staff_count || 0}</Text>
           </View>
+
           <View style={styles.detailRow}>
-            <Feather name="shield" size={16} color={colors.textSecondary} />
+            <Feather name="alert-circle" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Staffing</Text>
-            <View style={[styles.smallBadge, { backgroundColor: staffingColor + '20' }]}>
-              <Text style={[styles.smallBadgeText, { color: staffingColor }]}>{getStaffingLabel(task.staffing_status)}</Text>
+            <View style={[styles.inlineBadge, { backgroundColor: staffingColor + '20' }]}>
+              <Text style={[styles.inlineBadgeText, { color: staffingColor }]}>
+                {getStaffingLabel(task.staffing_status)}
+              </Text>
             </View>
           </View>
+
           <View style={styles.detailRow}>
             <Feather name="flag" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Status</Text>
             <View style={styles.statusRow}>
-              {['not_started', 'in_progress', 'completed'].map(s => (
+              {['not_started', 'in_progress', 'completed'].map((s) => (
                 <TouchableOpacity
                   testID={`status-${s}-btn`}
                   key={s}
@@ -279,22 +354,22 @@ export default function TaskDetailScreen() {
               onPress={() => setShowLogHours(true)}
             >
               <Feather name="plus" size={16} color={colors.primary} />
-              <Text style={styles.logAddBtnText}>Log Hours</Text>
+              <Text style={styles.logAddText}>Log Hours</Text>
             </TouchableOpacity>
           </View>
+
           {hours.length === 0 ? (
-            <Text style={styles.noLogs}>No hours logged yet</Text>
+            <Text style={styles.emptyText}>No hours logged yet</Text>
           ) : (
-            hours.map(log => (
+            hours.map((log: any) => (
               <View key={log.id} style={styles.logItem}>
-                <View style={styles.logInfo}>
-                  <Text style={styles.logMember}>{log.team_member_name}</Text>
-                  <Text style={styles.logDate}>{log.date}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.logTitle}>{log.team_member_name} — {log.hours}h</Text>
+                  <Text style={styles.logMeta}>{log.date}</Text>
                   {log.notes ? <Text style={styles.logNotes}>{log.notes}</Text> : null}
                 </View>
-                <Text style={styles.logHours}>{log.hours}h</Text>
-                <TouchableOpacity testID={`delete-log-${log.id}`} onPress={() => handleDeleteLog(log.id)}>
-                  <Feather name="x" size={16} color={colors.red} />
+                <TouchableOpacity onPress={() => handleDeleteLog(log.id)}>
+                  <Feather name="trash-2" size={18} color={colors.red} />
                 </TouchableOpacity>
               </View>
             ))
@@ -306,181 +381,167 @@ export default function TaskDetailScreen() {
           style={styles.deleteBtn}
           onPress={handleDeleteTask}
         >
-          <Feather name="trash-2" size={18} color={colors.red} />
+          <Feather name="trash-2" size={18} color="#fff" />
           <Text style={styles.deleteBtnText}>Delete Task</Text>
         </TouchableOpacity>
       </ScrollView>
 
       <Modal visible={showLogHours} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Log Hours</Text>
-              <TouchableOpacity testID="close-log-hours-btn" onPress={() => setShowLogHours(false)}>
-                <Feather name="x" size={24} color={colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalWrap}
+        >
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Log Hours</Text>
 
-            <Text style={styles.label}>Team Member</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.sm }}>
-              {team.map(m => (
-                <TouchableOpacity
-                  testID={`select-member-${m.id}`}
-                  key={m.id}
-                  style={[styles.memberChip, logMember === m.name && styles.memberChipActive]}
-                  onPress={() => setLogMember(m.name)}
-                >
-                  <Text style={[styles.memberChipText, logMember === m.name && styles.memberChipTextActive]}>
-                    {m.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            <View style={styles.rowInputs}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Hours *</Text>
-                <TextInput
-                  testID="log-hours-input"
-                  style={styles.input}
-                  placeholder="8"
-                  placeholderTextColor={colors.textSecondary}
-                  value={logHoursVal}
-                  onChangeText={setLogHoursVal}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              <View style={{ width: spacing.sm }} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Date</Text>
-                <TextInput
-                  testID="log-date-input"
-                  style={styles.input}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor={colors.textSecondary}
-                  value={logDate}
-                  onChangeText={setLogDate}
-                />
-              </View>
-            </View>
-
-            <Text style={styles.label}>Notes (optional)</Text>
+            <Text style={styles.inputLabel}>Team Member</Text>
             <TextInput
-              testID="log-notes-input"
-              style={[styles.input, { height: 60, textAlignVertical: 'top', paddingTop: spacing.sm }]}
-              placeholder="What was done..."
+              style={styles.input}
+              value={logMember}
+              onChangeText={setLogMember}
+              placeholder="Team member name"
               placeholderTextColor={colors.textSecondary}
+            />
+
+            <Text style={styles.inputLabel}>Hours</Text>
+            <TextInput
+              style={styles.input}
+              value={logHoursVal}
+              onChangeText={setLogHoursVal}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 8"
+              placeholderTextColor={colors.textSecondary}
+            />
+
+            <Text style={styles.inputLabel}>Date</Text>
+            <TextInput
+              style={styles.input}
+              value={logDate}
+              onChangeText={setLogDate}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.textSecondary}
+            />
+
+            <Text style={styles.inputLabel}>Notes</Text>
+            <TextInput
+              style={[styles.input, styles.multiline]}
               value={logNotes}
               onChangeText={setLogNotes}
               multiline
+              placeholder="Optional notes"
+              placeholderTextColor={colors.textSecondary}
             />
 
-            <TouchableOpacity
-              testID="submit-log-hours-btn"
-              style={[styles.submitBtn, saving && { opacity: 0.7 }]}
-              onPress={handleLogHours}
-              disabled={saving}
-            >
-              {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Log Hours</Text>}
-            </TouchableOpacity>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={() => setShowLogHours(false)}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleLogHours} disabled={saving}>
+                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Save</Text>}
+              </TouchableOpacity>
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={showEditTask} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Edit Task</Text>
-                <TouchableOpacity testID="close-edit-task-btn" onPress={() => setShowEditTask(false)}>
-                  <Feather name="x" size={24} color={colors.textPrimary} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.label}>Task Name</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalWrap}
+        >
+          <ScrollView contentContainerStyle={styles.modalScroll}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Edit Task Plan</Text>
+
+              <Text style={styles.inputLabel}>Task Name</Text>
               <TextInput
-                testID="edit-task-name-input"
                 style={styles.input}
                 value={editName}
                 onChangeText={setEditName}
-              />
-              <Text style={styles.label}>Start Date (YYYY-MM-DD, blank = auto from deps)</Text>
-              <TextInput
-                testID="edit-task-start-date-input"
-                style={styles.input}
-                value={editStartDate}
-                onChangeText={setEditStartDate}
-                placeholder="YYYY-MM-DD or blank for auto"
+                placeholder="Task name"
                 placeholderTextColor={colors.textSecondary}
-                keyboardType="numbers-and-punctuation"
               />
-              <View style={styles.rowInputs}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Duration (days)</Text>
-                  <TextInput
-                    testID="edit-task-duration-input"
-                    style={styles.input}
-                    value={editDuration}
-                    onChangeText={setEditDuration}
-                    keyboardType="number-pad"
-                  />
-                </View>
-                <View style={{ width: spacing.sm }} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Quoted Hours</Text>
-                  <TextInput
-                    testID="edit-task-hours-input"
-                    style={styles.input}
-                    value={editQuotedHours}
-                    onChangeText={setEditQuotedHours}
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-              </View>
-              <Text style={styles.label}>Allocated Staff</Text>
+
+              <Text style={styles.inputLabel}>Duration (working days)</Text>
               <TextInput
-                testID="edit-task-allocated-staff-input"
+                style={styles.input}
+                value={editDuration}
+                onChangeText={setEditDuration}
+                keyboardType="number-pad"
+                placeholder="e.g. 5"
+                placeholderTextColor={colors.textSecondary}
+              />
+
+              <Text style={styles.inputLabel}>Quoted Hours</Text>
+              <TextInput
+                style={styles.input}
+                value={editQuotedHours}
+                onChangeText={setEditQuotedHours}
+                keyboardType="decimal-pad"
+                placeholder="e.g. 80"
+                placeholderTextColor={colors.textSecondary}
+              />
+
+              <Text style={styles.inputLabel}>Allocated Staff</Text>
+              <TextInput
                 style={styles.input}
                 value={editAllocatedStaff}
                 onChangeText={setEditAllocatedStaff}
                 keyboardType="number-pad"
+                placeholder="e.g. 2"
+                placeholderTextColor={colors.textSecondary}
               />
-              {allTasks.length > 0 && (
-                <>
-                  <Text style={styles.label}>Link After (Dependencies)</Text>
-                  <Text style={{ fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm }}>
-                    This task starts after selected tasks finish
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
-                    {allTasks.map((t: any) => (
-                      <TouchableOpacity
-                        testID={`edit-dep-${t.id}`}
-                        key={t.id}
-                        style={[
-                          styles.memberChip,
-                          editDeps.includes(t.id) && styles.memberChipActive,
-                        ]}
-                        onPress={() => {
-                          setEditDeps(prev => prev.includes(t.id) ? prev.filter(d => d !== t.id) : [...prev, t.id]);
-                        }}
-                      >
-                        {editDeps.includes(t.id) && <Feather name="check" size={12} color={colors.primaryForeground} />}
-                        <Text style={[styles.memberChipText, editDeps.includes(t.id) && styles.memberChipTextActive]}>
-                          {t.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-              <TouchableOpacity
-                testID="submit-edit-task-btn"
-                style={[styles.submitBtn, saving && { opacity: 0.7 }]}
-                onPress={handleEditTask}
-                disabled={saving}
-              >
-                {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Save Changes</Text>}
+
+              <Text style={styles.inputLabel}>Manual Start Override</Text>
+              <TextInput
+                style={styles.input}
+                value={editStartDate}
+                onChangeText={setEditStartDate}
+                placeholder="YYYY-MM-DD (leave blank for auto)"
+                placeholderTextColor={colors.textSecondary}
+              />
+
+              <TouchableOpacity style={styles.clearOverrideBtn} onPress={handleClearManualDate}>
+                <Feather name="rotate-ccw" size={16} color={colors.secondary} />
+                <Text style={styles.clearOverrideText}>Clear manual date and auto-schedule from predecessors</Text>
               </TouchableOpacity>
+
+              <Text style={styles.inputLabel}>Predecessors (Finish-to-Start)</Text>
+              <View style={styles.depList}>
+                {allTasks.length === 0 ? (
+                  <Text style={styles.emptyText}>No other tasks available</Text>
+                ) : (
+                  allTasks.map((t: any) => {
+                    const selected = editDeps.includes(t.id);
+                    return (
+                      <TouchableOpacity
+                        key={t.id}
+                        style={[styles.depItem, selected && styles.depItemSelected]}
+                        onPress={() => toggleDep(t.id)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.depTitle}>{t.name}</Text>
+                          <Text style={styles.depMeta}>{t.start_date} → {t.end_date}</Text>
+                        </View>
+                        <Feather
+                          name={selected ? 'check-square' : 'square'}
+                          size={20}
+                          color={selected ? colors.primary : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.secondaryBtn} onPress={() => setShowEditTask(false)}>
+                  <Text style={styles.secondaryBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.primaryBtn} onPress={handleEditTask} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Save Plan</Text>}
+                </TouchableOpacity>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -493,111 +554,250 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  headerTitle: { ...typography.h2, color: colors.textPrimary, flex: 1, marginHorizontal: spacing.md, fontSize: 18 },
-  content: { padding: spacing.md, paddingBottom: 40 },
+  headerTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    flex: 1,
+    textAlign: 'center',
+  },
+  content: { padding: spacing.md, paddingBottom: 80, gap: spacing.md },
   indicatorCard: {
-    backgroundColor: colors.surface, borderRadius: radius.lg,
-    padding: spacing.md, borderWidth: 1, borderColor: colors.border,
-    borderLeftWidth: 4, marginBottom: spacing.md, ...shadows.subtle,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderLeftWidth: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.subtle,
   },
   indicatorRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
   indicatorLabel: { ...typography.h3, color: colors.textPrimary },
-  indicatorHours: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
+  indicatorHours: { ...typography.body, color: colors.textSecondary },
   circleProgress: {
-    width: 56, height: 56, borderRadius: 28,
+    width: 58, height: 58, borderRadius: 29,
     borderWidth: 3, borderColor: colors.border,
-    justifyContent: 'center', alignItems: 'center',
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surfaceSecondary,
   },
-  circleText: { fontSize: 16, fontWeight: '700' },
+  circleText: { fontSize: 16, fontWeight: '800' },
   progressBarBg: {
-    height: 8, backgroundColor: colors.surfaceSecondary,
-    borderRadius: 4, overflow: 'hidden',
+    height: 8, backgroundColor: colors.border, borderRadius: 4, overflow: 'hidden',
   },
   progressBarFill: { height: 8, borderRadius: 4 },
   detailsCard: {
-    backgroundColor: colors.surface, borderRadius: radius.lg,
-    padding: spacing.md, borderWidth: 1, borderColor: colors.border,
-    marginBottom: spacing.md, ...shadows.subtle,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.subtle,
   },
-  sectionTitle: { ...typography.caption, color: colors.textSecondary, marginBottom: spacing.sm },
-  detailRow: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm,
-    borderBottomWidth: 1, borderBottomColor: colors.border, flexWrap: 'wrap',
-  },
-  detailLabel: { fontSize: 14, color: colors.textSecondary, marginLeft: spacing.sm, width: 100 },
-  detailValue: { fontSize: 14, color: colors.textPrimary, fontWeight: '500', flex: 1, textAlign: 'right' },
-  smallBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.pill, marginLeft: 'auto' },
-  smallBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  statusRow: { flexDirection: 'row', gap: spacing.xs, flex: 1, justifyContent: 'flex-end', flexWrap: 'wrap' },
-  statusChip: {
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSecondary,
-  },
-  statusChipActive: { backgroundColor: colors.primary },
-  statusChipText: { fontSize: 11, fontWeight: '600', color: colors.textSecondary },
-  statusChipTextActive: { color: colors.primaryForeground },
   logsCard: {
-    backgroundColor: colors.surface, borderRadius: radius.lg,
-    padding: spacing.md, borderWidth: 1, borderColor: colors.border,
-    marginBottom: spacing.md, ...shadows.subtle,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadows.subtle,
   },
-  logsSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
-  logAddBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs,
-    borderRadius: radius.pill, backgroundColor: colors.primary + '15',
-  },
-  logAddBtnText: { fontSize: 13, fontWeight: '600', color: colors.primary },
-  noLogs: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
-  logItem: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm,
-    borderBottomWidth: 1, borderBottomColor: colors.border,
-  },
-  logInfo: { flex: 1 },
-  logMember: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  logDate: { fontSize: 12, color: colors.textSecondary },
-  logNotes: { fontSize: 12, color: colors.textSecondary, fontStyle: 'italic' },
-  logHours: { fontSize: 16, fontWeight: '700', color: colors.primary, marginRight: spacing.sm },
-  deleteBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    padding: spacing.md, borderRadius: radius.lg,
-    borderWidth: 1, borderColor: colors.red + '30', gap: spacing.sm,
-  },
-  deleteBtnText: { fontSize: 15, fontWeight: '600', color: colors.red },
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalContent: {
-    backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: spacing.lg, paddingBottom: spacing.xxl,
-  },
-  modalHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  sectionTitle: {
+    ...typography.caption,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
-  modalTitle: { ...typography.h2, color: colors.textPrimary },
-  label: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs, marginTop: spacing.sm },
+  detailRow: {
+    marginBottom: spacing.md,
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  detailValue: {
+    ...typography.body,
+    color: colors.textPrimary,
+  },
+  inlineBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  inlineBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  statusChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  statusChipActive: {
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary,
+  },
+  statusChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  statusChipTextActive: {
+    color: colors.secondaryForeground,
+  },
+  logsSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  logAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  logAddText: { color: colors.primary, fontWeight: '700' },
+  emptyText: { ...typography.body, color: colors.textSecondary },
+  logItem: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+    paddingVertical: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  logTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  logMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  logNotes: { fontSize: 13, color: colors.textSecondary, marginTop: 4 },
+  deleteBtn: {
+    backgroundColor: colors.red,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    ...shadows.medium,
+  },
+  deleteBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  modalScroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: 6,
+    marginTop: spacing.sm,
+  },
   input: {
-    height: 48, borderWidth: 1.5, borderColor: colors.border,
-    borderRadius: radius.md, paddingHorizontal: spacing.md,
-    fontSize: 16, color: colors.textPrimary, backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    color: colors.textPrimary,
+    fontSize: 16,
   },
-  rowInputs: { flexDirection: 'row' },
-  memberChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill,
-    backgroundColor: colors.surfaceSecondary, marginRight: spacing.sm,
-    borderWidth: 1, borderColor: colors.border,
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+  multiline: { minHeight: 88, textAlignVertical: 'top' },
+  clearOverrideBtn: {
+    marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: spacing.sm,
   },
-  memberChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  memberChipText: { fontSize: 14, fontWeight: '500', color: colors.textPrimary },
-  memberChipTextActive: { color: colors.primaryForeground },
-  submitBtn: {
-    height: 52, backgroundColor: colors.primary, borderRadius: radius.md,
-    justifyContent: 'center', alignItems: 'center', marginTop: spacing.lg,
+  clearOverrideText: {
+    color: colors.secondary,
+    fontWeight: '700',
+    flex: 1,
   },
-  submitBtnText: { fontSize: 17, fontWeight: '700', color: colors.primaryForeground },
+  depList: {
+    marginTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  depItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  depItemSelected: {
+    borderColor: colors.primary,
+    backgroundColor: '#FFF7ED',
+  },
+  depTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  depMeta: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  secondaryBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSecondary,
+  },
+  secondaryBtnText: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+  },
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
 });
-
