@@ -93,6 +93,7 @@ export default function ProjectDetailScreen() {
   const [newTaskQuotedHours, setNewTaskQuotedHours] = useState('0');
   const [newTaskAllocatedStaff, setNewTaskAllocatedStaff] = useState('0');
   const [newTaskStartDate, setNewTaskStartDate] = useState('');
+  const [newTaskDeps, setNewTaskDeps] = useState<string[]>([]);
 
   const router = useRouter();
 
@@ -124,6 +125,20 @@ export default function ProjectDetailScreen() {
     setEditTargetEndDate(project.target_end_date || '');
     setEditSaturdayEnabled(!!project.saturday_enabled);
     setShowEditProject(true);
+  };
+
+  const openAddTask = () => {
+    setNewTaskName('');
+    setNewTaskDuration('5');
+    setNewTaskQuotedHours('0');
+    setNewTaskAllocatedStaff('0');
+    setNewTaskStartDate('');
+    setNewTaskDeps([]);
+    setShowAddTask(true);
+  };
+
+  const toggleNewTaskDep = (taskId: string) => {
+    setNewTaskDeps((prev) => prev.includes(taskId) ? prev.filter((d) => d !== taskId) : [...prev, taskId]);
   };
 
   const handleSaveProject = async () => {
@@ -158,7 +173,7 @@ export default function ProjectDetailScreen() {
         quoted_hours: parseFloat(newTaskQuotedHours) || 0,
         allocated_staff_count: parseInt(newTaskAllocatedStaff) || 0,
         order: (project?.tasks || []).length,
-        dependencies: [],
+        dependencies: newTaskDeps,
       };
       if (newTaskStartDate.trim()) {
         payload.start_date = newTaskStartDate.trim();
@@ -170,6 +185,7 @@ export default function ProjectDetailScreen() {
       setNewTaskQuotedHours('0');
       setNewTaskAllocatedStaff('0');
       setNewTaskStartDate('');
+      setNewTaskDeps([]);
       setShowAddTask(false);
       loadProject();
     } finally {
@@ -236,7 +252,7 @@ export default function ProjectDetailScreen() {
           <TouchableOpacity testID="edit-project-btn" onPress={openEditProject}>
             <Feather name="edit-2" size={20} color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity testID="add-task-btn" onPress={() => setShowAddTask(true)}>
+          <TouchableOpacity testID="add-task-btn" onPress={openAddTask}>
             <Feather name="plus-circle" size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
@@ -327,7 +343,7 @@ export default function ProjectDetailScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>TASKS</Text>
-            <TouchableOpacity style={styles.sectionAddBtn} onPress={() => setShowAddTask(true)}>
+            <TouchableOpacity style={styles.sectionAddBtn} onPress={openAddTask}>
               <Feather name="plus" size={16} color={colors.primary} />
               <Text style={styles.sectionAddText}>Add Task</Text>
             </TouchableOpacity>
@@ -466,6 +482,34 @@ export default function ProjectDetailScreen() {
 
               <Text style={styles.inputLabel}>Manual Start Override</Text>
               <TextInput style={styles.input} value={newTaskStartDate} onChangeText={setNewTaskStartDate} placeholder="YYYY-MM-DD optional" placeholderTextColor={colors.textSecondary} />
+
+              <Text style={styles.inputLabel}>Predecessors (Finish-to-Start)</Text>
+              <View style={styles.depList}>
+                {tasks.length === 0 ? (
+                  <Text style={styles.emptyText}>No existing tasks to link yet</Text>
+                ) : (
+                  tasks.map((t: any) => {
+                    const selected = newTaskDeps.includes(t.id);
+                    return (
+                      <TouchableOpacity
+                        key={t.id}
+                        style={[styles.depItem, selected && styles.depItemSelected]}
+                        onPress={() => toggleNewTaskDep(t.id)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.depTitle}>{t.name}</Text>
+                          <Text style={styles.depMeta}>{t.start_date} → {t.end_date}</Text>
+                        </View>
+                        <Feather
+                          name={selected ? 'check-square' : 'square'}
+                          size={20}
+                          color={selected ? colors.primary : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
 
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.secondaryBtn} onPress={() => setShowAddTask(false)}>
@@ -697,6 +741,34 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   toggleLabel: { ...typography.body, color: colors.textPrimary, fontWeight: '700' },
+  depList: {
+    marginTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  depItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  depItemSelected: {
+    borderColor: colors.primary,
+    backgroundColor: '#FFF7ED',
+  },
+  depTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  depMeta: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   modalActions: {
     flexDirection: 'row',
     gap: spacing.sm,
