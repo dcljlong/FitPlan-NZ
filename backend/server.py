@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+﻿from fastapi import FastAPI, APIRouter, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -335,28 +335,33 @@ async def recalculate_task_dates(project_id: str):
         if tid in resolved:
             return resolved[tid]
 
-        # Check for manual start date override
+        def next_working_day(d):
+            years = list(range(d.year, d.year + 2))
+            hols = get_nz_holidays_set(region, years)
+            while not is_working_day(d, sat, hols):
+                d += timedelta(days=1)
+            return d
+
+        deps = task.get("dependencies", [])
+        if not deps:
+            earliest_allowed = next_working_day(proj_start)
+        else:
+            latest_end = proj_start
+            for dep_id in deps:
+                if dep_id in task_map:
+                    dep_resolved = resolve(task_map[dep_id])
+                    dep_end = date.fromisoformat(dep_resolved["end_date"])
+                    next_day = dep_end + timedelta(days=1)
+                    if next_day > latest_end:
+                        latest_end = next_day
+            earliest_allowed = next_working_day(latest_end)
+
         manual_start = task.get("start_date_override")
         if manual_start:
-            s = date.fromisoformat(manual_start)
+            manual_date = next_working_day(date.fromisoformat(manual_start))
+            s = manual_date if manual_date >= earliest_allowed else earliest_allowed
         else:
-            deps = task.get("dependencies", [])
-            if not deps:
-                s = proj_start
-            else:
-                latest_end = proj_start
-                for dep_id in deps:
-                    if dep_id in task_map:
-                        dep_resolved = resolve(task_map[dep_id])
-                        dep_end = date.fromisoformat(dep_resolved["end_date"])
-                        next_day = dep_end + timedelta(days=1)
-                        if next_day > latest_end:
-                            latest_end = next_day
-                s = latest_end
-                years = list(range(s.year, s.year + 2))
-                hols = get_nz_holidays_set(region, years)
-                while not is_working_day(s, sat, hols):
-                    s += timedelta(days=1)
+            s = earliest_allowed
 
         e = calculate_end_date(s, task["duration_days"], sat, region)
         resolved[tid] = {"start_date": s.isoformat(), "end_date": e.isoformat()}
