@@ -2,7 +2,7 @@
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, RefreshControl, Modal, TextInput,
-  KeyboardAvoidingView, Platform, Switch,
+  KeyboardAvoidingView, Platform, Switch, Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -73,6 +73,10 @@ function isTaskStaffRisk(task: any) {
   return ['under', 'unassigned'].includes(task?.staffing_status);
 }
 
+function isValidDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [project, setProject] = useState<any>(null);
@@ -141,41 +145,79 @@ export default function ProjectDetailScreen() {
   };
 
   const handleSaveProject = async () => {
-    if (!editName.trim()) return;
-    if (editTargetEndDate && !editTargetEndDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+    const cleanName = editName.trim();
+    const cleanTarget = editTargetEndDate.trim();
+
+    if (!cleanName) {
+      Alert.alert('Error', 'Project name is required');
+      return;
+    }
+    if (cleanTarget && !isValidDate(cleanTarget)) {
+      Alert.alert('Error', 'Target finish must be YYYY-MM-DD');
+      return;
+    }
+    if (cleanTarget && project?.start_date && cleanTarget < project.start_date) {
+      Alert.alert('Error', 'Target finish cannot be earlier than project start');
+      return;
+    }
 
     setSaving(true);
     try {
       await api.updateProject(id!, {
-        name: editName.trim(),
+        name: cleanName,
         description: editDescription.trim(),
-        target_end_date: editTargetEndDate.trim() || null,
+        target_end_date: cleanTarget || null,
         saturday_enabled: editSaturdayEnabled,
       });
       setShowEditProject(false);
       loadProject();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update project');
     } finally {
       setSaving(false);
     }
   };
 
   const handleAddTask = async () => {
-    if (!newTaskName.trim()) return;
-    if (!newTaskDuration || parseInt(newTaskDuration) <= 0) return;
-    if (newTaskStartDate && !newTaskStartDate.match(/^\d{4}-\d{2}-\d{2}$/)) return;
+    const cleanName = newTaskName.trim();
+    const duration = parseInt(newTaskDuration, 10);
+    const quotedHours = parseFloat(newTaskQuotedHours || '0');
+    const allocatedStaff = parseInt(newTaskAllocatedStaff || '0', 10);
+    const cleanStart = newTaskStartDate.trim();
+
+    if (!cleanName) {
+      Alert.alert('Error', 'Task name is required');
+      return;
+    }
+    if (!Number.isFinite(duration) || duration <= 0) {
+      Alert.alert('Error', 'Duration must be at least 1 working day');
+      return;
+    }
+    if (!Number.isFinite(quotedHours) || quotedHours < 0) {
+      Alert.alert('Error', 'Quoted hours cannot be negative');
+      return;
+    }
+    if (!Number.isFinite(allocatedStaff) || allocatedStaff < 0) {
+      Alert.alert('Error', 'Allocated staff cannot be negative');
+      return;
+    }
+    if (cleanStart && !isValidDate(cleanStart)) {
+      Alert.alert('Error', 'Manual start date must be YYYY-MM-DD');
+      return;
+    }
 
     setSaving(true);
     try {
       const payload: any = {
-        name: newTaskName.trim(),
-        duration_days: parseInt(newTaskDuration) || 1,
-        quoted_hours: parseFloat(newTaskQuotedHours) || 0,
-        allocated_staff_count: parseInt(newTaskAllocatedStaff) || 0,
+        name: cleanName,
+        duration_days: duration,
+        quoted_hours: quotedHours,
+        allocated_staff_count: allocatedStaff,
         order: (project?.tasks || []).length,
         dependencies: newTaskDeps,
       };
-      if (newTaskStartDate.trim()) {
-        payload.start_date = newTaskStartDate.trim();
+      if (cleanStart) {
+        payload.start_date = cleanStart;
       }
       await api.createTask(id!, payload);
 
@@ -187,6 +229,8 @@ export default function ProjectDetailScreen() {
       setNewTaskDeps([]);
       setShowAddTask(false);
       loadProject();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to create task');
     } finally {
       setSaving(false);
     }
@@ -217,8 +261,8 @@ export default function ProjectDetailScreen() {
   const readyCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'ready').length;
   const activeCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'active').length;
   const doneCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'completed').length;
-  const staffRiskCount = tasks.filter((t: any) => isTaskStaffRisk(t)).length;
-  const lateCount = tasks.filter((t: any) => isTaskLate(t)).length;
+  const staffRiskCount = project.understaffed_tasks ?? tasks.filter((t: any) => isTaskStaffRisk(t)).length;
+  const lateCount = project.late_tasks ?? tasks.filter((t: any) => isTaskLate(t)).length;
 
   const progressPct = project.total_quoted_hours > 0
     ? Math.min((project.total_logged_hours / project.total_quoted_hours) * 100, 100)
@@ -800,5 +844,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-
-

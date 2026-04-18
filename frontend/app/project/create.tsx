@@ -10,6 +10,10 @@ import { api } from '../../components/api';
 
 type Template = { id: string; name: string; description?: string };
 
+function isValidDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 export default function CreateProjectScreen() {
   const router = useRouter();
   const [name, setName] = useState('');
@@ -37,25 +41,34 @@ export default function CreateProjectScreen() {
   }, []);
 
   const handleCreate = async () => {
-    if (!name.trim()) {
+    const cleanName = name.trim();
+    const cleanStart = startDate.trim();
+    const cleanTarget = targetEndDate.trim();
+
+    if (!cleanName) {
       Alert.alert('Error', 'Project name is required');
       return;
     }
-    if (!startDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      Alert.alert('Error', 'Please enter a valid date (YYYY-MM-DD)');
+    if (!isValidDate(cleanStart)) {
+      Alert.alert('Error', 'Please enter a valid project start date (YYYY-MM-DD)');
       return;
     }
-    if (targetEndDate && !targetEndDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    if (cleanTarget && !isValidDate(cleanTarget)) {
       Alert.alert('Error', 'Please enter a valid target finish date (YYYY-MM-DD)');
       return;
     }
+    if (cleanTarget && cleanTarget < cleanStart) {
+      Alert.alert('Error', 'Target finish cannot be earlier than project start');
+      return;
+    }
+
     setLoading(true);
     try {
       const project = await api.createProject({
-        name: name.trim(),
+        name: cleanName,
         description: description.trim(),
-        start_date: startDate,
-        target_end_date: targetEndDate || null,
+        start_date: cleanStart,
+        target_end_date: cleanTarget || null,
         saturday_enabled: saturdayEnabled,
         location_region: region,
         template_id: selectedTemplate,
@@ -63,7 +76,7 @@ export default function CreateProjectScreen() {
       });
       router.replace(`/project/${project.id}`);
     } catch (e: any) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Error', e.message || 'Failed to create project');
     } finally {
       setLoading(false);
     }
