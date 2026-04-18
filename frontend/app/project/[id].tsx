@@ -65,13 +65,12 @@ function getReadinessLabel(readiness: string) {
   }
 }
 
-function isTaskLate(task: any, project: any) {
-  if (!project?.target_end_date || !task?.end_date) return false;
-  return String(task.end_date) > String(project.target_end_date);
+function isTaskLate(task: any) {
+  return task?.schedule_conflict_status === 'late';
 }
 
 function isTaskStaffRisk(task: any) {
-  return ['under', 'unassigned'].includes(task.staffing_status);
+  return ['under', 'unassigned'].includes(task?.staffing_status);
 }
 
 export default function ProjectDetailScreen() {
@@ -219,7 +218,7 @@ export default function ProjectDetailScreen() {
   const activeCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'active').length;
   const doneCount = tasks.filter((t: any) => getTaskReadiness(t, taskMap) === 'completed').length;
   const staffRiskCount = tasks.filter((t: any) => isTaskStaffRisk(t)).length;
-  const lateCount = tasks.filter((t: any) => isTaskLate(t, project)).length;
+  const lateCount = tasks.filter((t: any) => isTaskLate(t)).length;
 
   const progressPct = project.total_quoted_hours > 0
     ? Math.min((project.total_logged_hours / project.total_quoted_hours) * 100, 100)
@@ -228,7 +227,7 @@ export default function ProjectDetailScreen() {
   const sortedTasks = [...tasks].sort((a: any, b: any) => {
     const weight = (t: any) => {
       const readiness = getTaskReadiness(t, taskMap);
-      const late = isTaskLate(t, project);
+      const late = isTaskLate(t);
       const staffRisk = isTaskStaffRisk(t);
 
       if (late || staffRisk) return 0;
@@ -357,7 +356,7 @@ export default function ProjectDetailScreen() {
               const readinessColor = getReadinessColor(readiness);
               const staffingColor = getStaffingColor(task.staffing_status);
               const depsCount = (task.dependencies || []).length;
-              const late = isTaskLate(task, project);
+              const late = isTaskLate(task);
               const staffRisk = isTaskStaffRisk(task);
 
               return (
@@ -801,3 +800,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+
