@@ -6,7 +6,17 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { colors, spacing, radius, typography, shadows, getStatusColor, getStatusLabel, getScheduleColor, getScheduleLabel } from '../../components/theme';
+import {
+  colors,
+  spacing,
+  radius,
+  typography,
+  shadows,
+  getStatusColor,
+  getStatusLabel,
+  getScheduleColor,
+  getScheduleLabel,
+} from '../../components/theme';
 import { api } from '../../components/api';
 import { useUser } from '../../contexts/UserContext';
 
@@ -36,10 +46,23 @@ export default function ProjectsScreen() {
     loadProjects();
   };
 
+  const totalProjects = projects.length;
+  const lateProjects = projects.filter((p: any) => (p.late_tasks || 0) > 0).length;
+  const staffRiskProjects = projects.filter((p: any) => (p.understaffed_tasks || 0) > 0).length;
+  const activeRiskProjects = projects.filter((p: any) =>
+    (p.late_tasks || 0) > 0 || (p.understaffed_tasks || 0) > 0
+  ).length;
+  const readyProjects = projects.filter((p: any) =>
+    (p.task_count || 0) > 0 && (p.completed_tasks || 0) < (p.task_count || 0)
+  ).length;
+
   const renderProject = ({ item }: { item: any }) => {
     const indicatorColor = getStatusColor(item.overall_indicator);
     const scheduleColor = getScheduleColor(item.schedule_status);
     const progress = item.task_count > 0 ? item.completed_tasks / item.task_count : 0;
+    const lateTasks = item.late_tasks || 0;
+    const staffRisk = item.understaffed_tasks || 0;
+
     return (
       <TouchableOpacity
         testID={`project-card-${item.id}`}
@@ -52,9 +75,11 @@ export default function ProjectsScreen() {
           <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
           <Feather name="chevron-right" size={20} color={colors.textSecondary} />
         </View>
+
         {item.description ? (
           <Text style={styles.cardDesc} numberOfLines={1}>{item.description}</Text>
         ) : null}
+
         <View style={styles.cardMeta}>
           <View style={styles.metaItem}>
             <Feather name="calendar" size={14} color={colors.textSecondary} />
@@ -65,19 +90,33 @@ export default function ProjectsScreen() {
             <Text style={styles.metaText}>{item.completed_tasks}/{item.task_count} tasks</Text>
           </View>
         </View>
+
         <View style={styles.cardMeta}>
           <View style={styles.metaItem}>
             <Feather name="target" size={14} color={scheduleColor} />
             <Text style={[styles.metaText, { color: scheduleColor }]}>{item.target_end_date || 'No target finish'}</Text>
           </View>
           <View style={styles.metaItem}>
-            <Feather name="users" size={14} color={item.understaffed_tasks > 0 ? colors.red : colors.textSecondary} />
-            <Text style={[styles.metaText, item.understaffed_tasks > 0 && { color: colors.red }]}>{item.understaffed_tasks || 0} staff risk</Text>
+            <Feather name="users" size={14} color={staffRisk > 0 ? colors.red : colors.textSecondary} />
+            <Text style={[styles.metaText, staffRisk > 0 && { color: colors.red }]}>{staffRisk} staff risk</Text>
           </View>
         </View>
+
+        <View style={styles.cardMeta}>
+          <View style={styles.metaItem}>
+            <Feather name="alert-triangle" size={14} color={lateTasks > 0 ? colors.red : colors.textSecondary} />
+            <Text style={[styles.metaText, lateTasks > 0 && { color: colors.red }]}>{lateTasks} late task{lateTasks === 1 ? '' : 's'}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Feather name="briefcase" size={14} color={colors.textSecondary} />
+            <Text style={styles.metaText}>{item.total_allocated_staff || 0} alloc staff</Text>
+          </View>
+        </View>
+
         <View style={styles.progressBarBg}>
           <View style={[styles.progressBarFill, { width: `${progress * 100}%`, backgroundColor: indicatorColor }]} />
         </View>
+
         <View style={styles.hoursRow}>
           <Text style={styles.hoursLabel}>
             {item.total_logged_hours?.toFixed(1) || '0'} / {item.total_quoted_hours?.toFixed(1) || '0'} hrs
@@ -99,14 +138,59 @@ export default function ProjectsScreen() {
     );
   };
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+  const ListHeader = () => (
+    <View>
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>G'day, {userName} 👋</Text>
           <Text style={styles.headerTitle}>Projects</Text>
         </View>
       </View>
+
+      <View style={styles.summaryGrid}>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Projects</Text>
+          <Text style={styles.summaryValue}>{totalProjects}</Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>At Risk</Text>
+          <Text style={[styles.summaryValue, activeRiskProjects > 0 && { color: colors.red }]}>
+            {activeRiskProjects}
+          </Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Late</Text>
+          <Text style={[styles.summaryValue, lateProjects > 0 && { color: colors.red }]}>
+            {lateProjects}
+          </Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Staff Risk</Text>
+          <Text style={[styles.summaryValue, staffRiskProjects > 0 && { color: colors.red }]}>
+            {staffRiskProjects}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.summaryGrid}>
+        <View style={styles.summaryWideCard}>
+          <View style={styles.summaryWideTop}>
+            <Text style={styles.summaryWideTitle}>Quick View</Text>
+            <Feather name="activity" size={16} color={colors.primary} />
+          </View>
+          <Text style={styles.summaryWideText}>
+            {readyProjects} active project{readyProjects === 1 ? '' : 's'} in progress or ready to move.
+          </Text>
+          <Text style={styles.summaryWideSubtext}>
+            Focus first on late tasks and staff risk to keep target finish dates realistic.
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -118,6 +202,7 @@ export default function ProjectsScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderProject}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={<ListHeader />}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
           ListEmptyComponent={
             <View style={styles.empty}>
@@ -128,6 +213,7 @@ export default function ProjectsScreen() {
           }
         />
       )}
+
       <TouchableOpacity
         testID="create-project-btn"
         style={styles.fab}
@@ -158,6 +244,65 @@ const styles = StyleSheet.create({
   },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { padding: spacing.md, paddingBottom: 100 },
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  summaryCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minWidth: '23%',
+    flex: 1,
+    ...shadows.subtle,
+  },
+  summaryWideCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flex: 1,
+    ...shadows.subtle,
+  },
+  summaryWideTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  summaryWideTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    textTransform: 'uppercase',
+  },
+  summaryWideText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
+  summaryWideSubtext: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+  },
+  summaryValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginTop: 6,
+  },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -209,6 +354,7 @@ const styles = StyleSheet.create({
     height: 6,
     backgroundColor: colors.border,
     borderRadius: 3,
+    marginTop: spacing.xs,
     marginBottom: spacing.sm,
     overflow: 'hidden',
   },
