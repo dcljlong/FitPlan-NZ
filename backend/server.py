@@ -282,7 +282,25 @@ DEFAULT_TEMPLATES = [
     },
 ]
 
-# ==================== HELPER: build task response ====================
+def get_staffing_status(required_staff: float, allocated_staff_count: int) -> str:
+    if required_staff <= 0:
+        return "neutral"
+    if allocated_staff_count <= 0:
+        return "unassigned"
+    if allocated_staff_count + 0.01 < required_staff:
+        return "under"
+    if allocated_staff_count > required_staff + 0.5:
+        return "over"
+    return "ok"
+
+def get_schedule_conflict_status(task: dict, project: dict) -> str:
+    target_end = project.get("target_end_date")
+    task_end = task.get("end_date")
+    if not target_end or not task_end:
+        return "neutral"
+    if str(task_end) > str(target_end):
+        return "late"
+    return "ok"
 
 async def build_task_response(task: dict, project: dict) -> dict:
     start = date.fromisoformat(task["start_date"])
@@ -292,8 +310,12 @@ async def build_task_response(task: dict, project: dict) -> dict:
 
     logs = await db.hour_logs.find({"task_id": task["id"]}, {"_id": 0}).to_list(1000)
     logged = sum(entry.get("hours", 0) for entry in logs)
-    req_staff = calculate_required_staff(task["quoted_hours"], start, end, sat, region)
-    indicator = get_progress_indicator(task["quoted_hours"], logged)
+    quoted_hours = task.get("quoted_hours", 0)
+    allocated_staff_count = int(task.get("allocated_staff_count", 0) or 0)
+    req_staff = calculate_required_staff(quoted_hours, start, end, sat, region)
+    indicator = get_progress_indicator(quoted_hours, logged)
+    staffing_status = get_staffing_status(req_staff, allocated_staff_count)
+    schedule_conflict_status = get_schedule_conflict_status(task, project)
 
     return {
         "id": task["id"],
@@ -302,9 +324,13 @@ async def build_task_response(task: dict, project: dict) -> dict:
         "start_date": task["start_date"],
         "end_date": task["end_date"],
         "duration_days": task["duration_days"],
-        "quoted_hours": task["quoted_hours"],
+        "quoted_hours": quoted_hours,
         "logged_hours": logged,
         "required_staff": req_staff,
+        "allocated_staff_count": allocated_staff_count,
+        "staff_gap": round(req_staff - allocated_staff_count, 2),
+        "staffing_status": staffing_status,
+        "schedule_conflict_status": schedule_conflict_status,
         "order": task["order"],
         "dependencies": task.get("dependencies", []),
         "assigned_to": task.get("assigned_to", []),
@@ -543,6 +569,11 @@ async def get_project(project_id: str):
     total_logged = sum(t["logged_hours"] for t in task_responses)
     project["total_quoted_hours"] = total_quoted
     project["total_logged_hours"] = total_logged
+    project["total_required_staff"] = round(sum(t.get("required_staff", 0) for t in task_responses), 2)
+    project["total_allocated_staff"] = sum(t.get("allocated_staff_count", 0) for t in task_responses)
+    project["understaffed_tasks"] = sum(1 for t in task_responses if t.get("staffing_status") in {"under", "unassigned"})
+    project["late_tasks"] = sum(1 for t in task_responses if t.get("schedule_conflict_status") == "late")
+    project["forecast_end_date"] = project.get("end_date")
     project["overall_indicator"] = get_progress_indicator(total_quoted, total_logged)
     return project
 
@@ -839,3 +870,4 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
