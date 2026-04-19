@@ -22,6 +22,12 @@ import {
 } from '../../components/theme';
 import { api } from '../../components/api';
 
+function formatIsoToNz(value?: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || '';
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 function isTaskBlocked(task: any, taskMap: Record<string, any>) {
   const deps = task.dependencies || [];
   if (deps.length === 0) return false;
@@ -287,7 +293,7 @@ export default function ProjectDetailScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity testID="back-from-project-btn" onPress={() => router.back()}>
+        <TouchableOpacity testID="back-from-project-btn" onPress={() => router.replace('/projects')}>
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{project.name}</Text>
@@ -312,7 +318,7 @@ export default function ProjectDetailScreen() {
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaItem}>
               <Feather name="calendar" size={15} color={colors.textSecondary} />
-              <Text style={styles.heroMetaText}>{project.start_date} → {project.forecast_end_date || project.end_date}</Text>
+              <Text style={styles.heroMetaText}>{formatIsoToNz(project.start_date)} → {formatIsoToNz(project.forecast_end_date || project.end_date)}</Text>
             </View>
             <View style={[styles.inlineBadge, { backgroundColor: scheduleColor + '20' }]}>
               <Text style={[styles.inlineBadgeText, { color: scheduleColor }]}>{getScheduleLabel(project.schedule_status)}</Text>
@@ -322,7 +328,7 @@ export default function ProjectDetailScreen() {
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaItem}>
               <Feather name="target" size={15} color={scheduleColor} />
-              <Text style={[styles.heroMetaText, { color: scheduleColor }]}>{project.target_end_date || 'No target finish set'}</Text>
+              <Text style={[styles.heroMetaText, { color: scheduleColor }]}>{project.target_end_date ? formatIsoToNz(project.target_end_date) : 'No target finish set'}</Text>
             </View>
             <View style={[styles.inlineBadge, { backgroundColor: indicatorColor + '20' }]}>
               <Text style={[styles.inlineBadgeText, { color: indicatorColor }]}>{getStatusLabel(project.overall_indicator)}</Text>
@@ -422,7 +428,7 @@ export default function ProjectDetailScreen() {
                   <View style={styles.taskMetaRow}>
                     <View style={styles.taskMetaItem}>
                       <Feather name="calendar" size={14} color={colors.textSecondary} />
-                      <Text style={styles.taskMetaText}>{task.start_date} → {task.end_date}</Text>
+                      <Text style={styles.taskMetaText}>{formatIsoToNz(task.start_date)} → {formatIsoToNz(task.end_date)}</Text>
                     </View>
                     <View style={[styles.inlineBadge, { backgroundColor: readinessColor + '20' }]}>
                       <Text style={[styles.inlineBadgeText, { color: readinessColor }]}>
@@ -541,7 +547,7 @@ export default function ProjectDetailScreen() {
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={styles.depTitle}>{t.name}</Text>
-                          <Text style={styles.depMeta}>{t.start_date} → {t.end_date}</Text>
+                          <Text style={styles.depMeta}>{formatIsoToNz(t.start_date)} → {formatIsoToNz(t.end_date)}</Text>
                         </View>
                         <Feather
                           name={selected ? 'check-square' : 'square'}

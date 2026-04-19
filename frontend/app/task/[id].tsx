@@ -21,6 +21,12 @@ import {
 import { api } from '../../components/api';
 import { useUser } from '../../contexts/UserContext';
 
+function formatIsoToNz(value?: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || '';
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [task, setTask] = useState<any>(null);
@@ -245,7 +251,7 @@ export default function TaskDetailScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity testID="back-from-task-btn" onPress={() => router.back()}>
+        <TouchableOpacity testID="back-from-task-btn" onPress={() => router.replace('/projects')}>
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{task.name}</Text>
@@ -278,7 +284,7 @@ export default function TaskDetailScreen() {
           <View style={styles.detailRow}>
             <Feather name="calendar" size={16} color={colors.textSecondary} />
             <Text style={styles.detailLabel}>Schedule</Text>
-            <Text style={styles.detailValue}>{task.start_date} → {task.end_date}</Text>
+            <Text style={styles.detailValue}>{formatIsoToNz(task.start_date)} → {formatIsoToNz(task.end_date)}</Text>
           </View>
 
           <View style={styles.detailRow}>
@@ -365,7 +371,7 @@ export default function TaskDetailScreen() {
               <View key={log.id} style={styles.logItem}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.logTitle}>{log.team_member_name} — {log.hours}h</Text>
-                  <Text style={styles.logMeta}>{log.date}</Text>
+                  <Text style={styles.logMeta}>{formatIsoToNz(log.date)}</Text>
                   {log.notes ? <Text style={styles.logNotes}>{log.notes}</Text> : null}
                 </View>
                 <TouchableOpacity onPress={() => handleDeleteLog(log.id)}>
@@ -521,7 +527,7 @@ export default function TaskDetailScreen() {
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={styles.depTitle}>{t.name}</Text>
-                          <Text style={styles.depMeta}>{t.start_date} → {t.end_date}</Text>
+                          <Text style={styles.depMeta}>{formatIsoToNz(t.start_date)} → {formatIsoToNz(t.end_date)}</Text>
                         </View>
                         <Feather
                           name={selected ? 'check-square' : 'square'}
