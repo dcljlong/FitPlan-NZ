@@ -190,6 +190,7 @@ class ProjectCreate(BaseModel):
     name: str
     description: str = ""
     start_date: str
+    target_end_date: Optional[str] = None
     saturday_enabled: bool = False
     location_region: str = "AUK"
     template_id: Optional[str] = None
@@ -516,6 +517,7 @@ async def create_project(req: ProjectCreate):
         "name": req.name,
         "description": req.description,
         "start_date": req.start_date,
+        "target_end_date": req.target_end_date,
         "end_date": req.start_date,
         "saturday_enabled": req.saturday_enabled,
         "location_region": req.location_region,

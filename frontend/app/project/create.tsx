@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Switch, ScrollView,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Switch, ScrollView, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,9 +9,134 @@ import { colors, spacing, radius, typography, shadows } from '../../components/t
 import { api } from '../../components/api';
 
 type Template = { id: string; name: string; description?: string };
+type PickerField = 'start' | 'target' | null;
 
-function isValidDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function partsToIso(day: number, month: number, year: number) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function isoToParts(iso?: string | null) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const today = new Date();
+    return {
+      day: today.getDate(),
+      month: today.getMonth() + 1,
+      year: today.getFullYear(),
+    };
+  }
+  const [year, month, day] = iso.split('-').map(Number);
+  return { day, month, year };
+}
+
+function isoToNz(iso?: string | null) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function daysInMonth(month: number, year: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+function clampDateParts(day: number, month: number, year: number) {
+  let m = Math.min(12, Math.max(1, month));
+  let y = Math.min(2100, Math.max(2020, year));
+  let d = Math.min(daysInMonth(m, y), Math.max(1, day));
+  return { day: d, month: m, year: y };
+}
+
+function DatePickerModal({
+  visible,
+  title,
+  initialIso,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  title: string;
+  initialIso?: string | null;
+  onCancel: () => void;
+  onConfirm: (iso: string) => void;
+}) {
+  const initial = isoToParts(initialIso);
+  const [day, setDay] = useState(initial.day);
+  const [month, setMonth] = useState(initial.month);
+  const [year, setYear] = useState(initial.year);
+
+  useEffect(() => {
+    const next = isoToParts(initialIso);
+    setDay(next.day);
+    setMonth(next.month);
+    setYear(next.year);
+  }, [initialIso, visible]);
+
+  const update = (nextDay: number, nextMonth: number, nextYear: number) => {
+    const clamped = clampDateParts(nextDay, nextMonth, nextYear);
+    setDay(clamped.day);
+    setMonth(clamped.month);
+    setYear(clamped.year);
+  };
+
+  const display = isoToNz(partsToIso(day, month, year));
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.modalWrap}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <Text style={styles.modalPreview}>{display}</Text>
+
+          <View style={styles.pickerGrid}>
+            <View style={styles.pickerCol}>
+              <Text style={styles.pickerLabel}>Day</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day + 1, month, year)}>
+                <Feather name="chevron-up" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <Text style={styles.spinValue}>{pad2(day)}</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day - 1, month, year)}>
+                <Feather name="chevron-down" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.pickerCol}>
+              <Text style={styles.pickerLabel}>Month</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month + 1, year)}>
+                <Feather name="chevron-up" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <Text style={styles.spinValue}>{pad2(month)}</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month - 1, year)}>
+                <Feather name="chevron-down" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.pickerCol}>
+              <Text style={styles.pickerLabel}>Year</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month, year + 1)}>
+                <Feather name="chevron-up" size={20} color={colors.primary} />
+              </TouchableOpacity>
+              <Text style={styles.spinValue}>{year}</Text>
+              <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month, year - 1)}>
+                <Feather name="chevron-down" size={20} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={onCancel}>
+              <Text style={styles.secondaryBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.primaryBtn} onPress={() => onConfirm(partsToIso(day, month, year))}>
+              <Text style={styles.primaryBtnText}>Use Date</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 }
 
 export default function CreateProjectScreen() {
@@ -26,6 +151,12 @@ export default function CreateProjectScreen() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [region, setRegion] = useState('AUK');
+  const [pickerField, setPickerField] = useState<PickerField>(null);
+
+  useEffect(() => {
+    const today = new Date();
+    setStartDate(partsToIso(today.getDate(), today.getMonth() + 1, today.getFullYear()));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -49,12 +180,8 @@ export default function CreateProjectScreen() {
       Alert.alert('Error', 'Project name is required');
       return;
     }
-    if (!isValidDate(cleanStart)) {
-      Alert.alert('Error', 'Please enter a valid project start date (YYYY-MM-DD)');
-      return;
-    }
-    if (cleanTarget && !isValidDate(cleanTarget)) {
-      Alert.alert('Error', 'Please enter a valid target finish date (YYYY-MM-DD)');
+    if (!cleanStart) {
+      Alert.alert('Error', 'Project start date is required');
       return;
     }
     if (cleanTarget && cleanTarget < cleanStart) {
@@ -82,6 +209,9 @@ export default function CreateProjectScreen() {
     }
   };
 
+  const currentPickerIso = pickerField === 'start' ? startDate : targetEndDate;
+  const currentPickerTitle = pickerField === 'start' ? 'Select Project Start' : 'Select Target Finish';
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -95,6 +225,17 @@ export default function CreateProjectScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <Text style={styles.label}>Project Name *</Text>
+          <TouchableOpacity style={styles.inputLike} onPress={() => {}}>
+            <Text style={[styles.inputLikeText, !name && styles.placeholderText]}>
+              {name || 'Type project name below'}
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.inlineInputWrap}>
+            <Text style={styles.miniLabel}>Name</Text>
+            <TouchableOpacity style={styles.hiddenTouch} activeOpacity={1}>
+              <View pointerEvents="none" />
+            </TouchableOpacity>
+          </View>
           <TextInput
             testID="project-name-input"
             style={styles.input}
@@ -116,26 +257,35 @@ export default function CreateProjectScreen() {
           />
 
           <Text style={styles.label}>Project Start *</Text>
-          <TextInput
+          <TouchableOpacity
             testID="project-start-date-input"
-            style={styles.input}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textSecondary}
-            value={startDate}
-            onChangeText={setStartDate}
-            keyboardType="numbers-and-punctuation"
-          />
+            style={styles.dateButton}
+            onPress={() => setPickerField('start')}
+          >
+            <Feather name="calendar" size={18} color={colors.primary} />
+            <Text style={[styles.dateButtonText, !startDate && styles.placeholderText]}>
+              {startDate ? isoToNz(startDate) : 'Select start date'}
+            </Text>
+          </TouchableOpacity>
 
           <Text style={styles.label}>Target Finish</Text>
-          <TextInput
+          <TouchableOpacity
             testID="project-target-end-date-input"
-            style={styles.input}
-            placeholder="YYYY-MM-DD (optional)"
-            placeholderTextColor={colors.textSecondary}
-            value={targetEndDate}
-            onChangeText={setTargetEndDate}
-            keyboardType="numbers-and-punctuation"
-          />
+            style={styles.dateButton}
+            onPress={() => setPickerField('target')}
+          >
+            <Feather name="calendar" size={18} color={colors.primary} />
+            <Text style={[styles.dateButtonText, !targetEndDate && styles.placeholderText]}>
+              {targetEndDate ? isoToNz(targetEndDate) : 'Select target finish'}
+            </Text>
+          </TouchableOpacity>
+
+          {targetEndDate ? (
+            <TouchableOpacity style={styles.clearDateRow} onPress={() => setTargetEndDate('')}>
+              <Feather name="x-circle" size={16} color={colors.textSecondary} />
+              <Text style={styles.clearDateText}>Clear target finish</Text>
+            </TouchableOpacity>
+          ) : null}
 
           <View style={styles.toggleRow}>
             <View>
@@ -212,6 +362,24 @@ export default function CreateProjectScreen() {
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>Create Project</Text>}
         </TouchableOpacity>
       </ScrollView>
+
+      <DatePickerModal
+        visible={pickerField !== null}
+        title={currentPickerTitle}
+        initialIso={currentPickerIso}
+        onCancel={() => setPickerField(null)}
+        onConfirm={(iso) => {
+          if (pickerField === 'start') {
+            setStartDate(iso);
+            if (targetEndDate && targetEndDate < iso) {
+              setTargetEndDate('');
+            }
+          } else if (pickerField === 'target') {
+            setTargetEndDate(iso);
+          }
+          setPickerField(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -251,8 +419,54 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 16,
   },
+  inputLike: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    marginBottom: spacing.xs,
+  },
+  inputLikeText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  placeholderText: {
+    color: colors.textSecondary,
+  },
+  inlineInputWrap: { display: 'none' },
+  miniLabel: { display: 'none' },
+  hiddenTouch: { display: 'none' },
   multiline: { minHeight: 88, textAlignVertical: 'top' },
   helper: { ...typography.body, color: colors.textSecondary, fontSize: 14 },
+  dateButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
+  clearDateRow: {
+    marginTop: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  clearDateText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   toggleRow: {
     marginTop: spacing.md,
     flexDirection: 'row',
@@ -302,4 +516,91 @@ const styles = StyleSheet.create({
     ...shadows.medium,
   },
   submitBtnText: { color: colors.primaryForeground, fontSize: 16, fontWeight: '700' },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  modalPreview: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary,
+    marginBottom: spacing.md,
+  },
+  pickerGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  pickerCol: {
+    flex: 1,
+    alignItems: 'center',
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  pickerLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  spinBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  spinValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginVertical: spacing.xs,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  secondaryBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceSecondary,
+  },
+  secondaryBtnText: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+  },
+  primaryBtn: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+  },
 });
+
