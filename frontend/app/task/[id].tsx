@@ -27,6 +27,38 @@ function formatIsoToNz(value?: string | null) {
   return `${day}/${month}/${year}`;
 }
 
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function partsToIso(day: number, month: number, year: number) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function isoToParts(iso?: string | null) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const today = new Date();
+    return {
+      day: today.getDate(),
+      month: today.getMonth() + 1,
+      year: today.getFullYear(),
+    };
+  }
+  const [year, month, day] = iso.split('-').map(Number);
+  return { day, month, year };
+}
+
+function daysInMonth(month: number, year: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+function clampDateParts(day: number, month: number, year: number) {
+  let m = Math.min(12, Math.max(1, month));
+  let y = Math.min(2100, Math.max(2020, year));
+  let d = Math.min(daysInMonth(m, y), Math.max(1, day));
+  return { day: d, month: m, year: y };
+}
+
 export default function TaskDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [task, setTask] = useState<any>(null);
@@ -50,6 +82,7 @@ export default function TaskDetailScreen() {
   const [editAllocatedStaff, setEditAllocatedStaff] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeps, setEditDeps] = useState<string[]>([]);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const router = useRouter();
   const { userName } = useUser();
@@ -193,7 +226,7 @@ export default function TaskDetailScreen() {
         onPress: async () => {
           try {
             await api.deleteTask(id!);
-            router.back();
+            router.replace(`/project/${task.project_id}`);
           } catch (e: any) {
             Alert.alert('Error', e.message);
           }
@@ -251,7 +284,7 @@ export default function TaskDetailScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity testID="back-from-task-btn" onPress={() => router.replace('/projects')}>
+        <TouchableOpacity testID="back-from-task-btn" onPress={() => router.replace(`/project/${task.project_id}`)}>
           <Feather name="arrow-left" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{task.name}</Text>
@@ -499,13 +532,15 @@ export default function TaskDetailScreen() {
               />
 
               <Text style={styles.inputLabel}>Manual Start Override</Text>
-              <TextInput
-                style={styles.input}
-                value={editStartDate}
-                onChangeText={setEditStartDate}
-                placeholder="YYYY-MM-DD (leave blank for auto)"
-                placeholderTextColor={colors.textSecondary}
-              />
+              <TouchableOpacity
+                style={styles.dateButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Feather name="calendar" size={18} color={colors.primary} />
+                <Text style={[styles.dateButtonText, !editStartDate && styles.placeholderText]}>
+                  {editStartDate ? formatIsoToNz(editStartDate) : 'Select simple start date (optional)'}
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity style={styles.clearOverrideBtn} onPress={handleClearManualDate}>
                 <Feather name="rotate-ccw" size={16} color={colors.secondary} />
@@ -552,7 +587,102 @@ export default function TaskDetailScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal visible={showDatePicker} animationType="slide" transparent>
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Manual Start</Text>
+            <TaskDatePicker
+              initialIso={editStartDate}
+              onCancel={() => setShowDatePicker(false)}
+              onConfirm={(iso) => {
+                setEditStartDate(iso);
+                setShowDatePicker(false);
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function TaskDatePicker({
+  initialIso,
+  onCancel,
+  onConfirm,
+}: {
+  initialIso?: string | null;
+  onCancel: () => void;
+  onConfirm: (iso: string) => void;
+}) {
+  const initial = isoToParts(initialIso);
+  const [day, setDay] = useState(initial.day);
+  const [month, setMonth] = useState(initial.month);
+  const [year, setYear] = useState(initial.year);
+
+  useEffect(() => {
+    const next = isoToParts(initialIso);
+    setDay(next.day);
+    setMonth(next.month);
+    setYear(next.year);
+  }, [initialIso]);
+
+  const update = (nextDay: number, nextMonth: number, nextYear: number) => {
+    const clamped = clampDateParts(nextDay, nextMonth, nextYear);
+    setDay(clamped.day);
+    setMonth(clamped.month);
+    setYear(clamped.year);
+  };
+
+  return (
+    <>
+      <Text style={styles.modalPreview}>{formatIsoToNz(partsToIso(day, month, year))}</Text>
+
+      <View style={styles.pickerGrid}>
+        <View style={styles.pickerCol}>
+          <Text style={styles.pickerLabel}>Day</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day + 1, month, year)}>
+            <Feather name="chevron-up" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={styles.spinValue}>{pad2(day)}</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day - 1, month, year)}>
+            <Feather name="chevron-down" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.pickerCol}>
+          <Text style={styles.pickerLabel}>Month</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month + 1, year)}>
+            <Feather name="chevron-up" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={styles.spinValue}>{pad2(month)}</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month - 1, year)}>
+            <Feather name="chevron-down" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.pickerCol}>
+          <Text style={styles.pickerLabel}>Year</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month, year + 1)}>
+            <Feather name="chevron-up" size={20} color={colors.primary} />
+          </TouchableOpacity>
+          <Text style={styles.spinValue}>{year}</Text>
+          <TouchableOpacity style={styles.spinBtn} onPress={() => update(day, month, year - 1)}>
+            <Feather name="chevron-down" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.modalActions}>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={onCancel}>
+          <Text style={styles.secondaryBtnText}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => onConfirm(partsToIso(day, month, year))}>
+          <Text style={styles.primaryBtnText}>Use Date</Text>
+        </TouchableOpacity>
+      </View>
+    </>
   );
 }
 
@@ -735,6 +865,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   multiline: { minHeight: 88, textAlignVertical: 'top' },
+  dateButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: colors.textPrimary,
+    fontWeight: '600',
+  },
+  placeholderText: {
+    color: colors.textSecondary,
+  },
   clearOverrideBtn: {
     marginTop: spacing.sm,
     flexDirection: 'row',
@@ -805,5 +954,42 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     color: '#fff',
     fontWeight: '700',
+  },
+  modalPreview: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary,
+    marginBottom: spacing.md,
+  },
+  pickerGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  pickerCol: {
+    flex: 1,
+    alignItems: 'center',
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  pickerLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  spinBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  spinValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginVertical: spacing.xs,
   },
 });
